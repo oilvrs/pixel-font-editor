@@ -1,2 +1,2 @@
 # pixel-font-editor
-Ett verktyg för att snabbt rita pixelerade bokstäver (glyphs) på ett rutnät och exportera dem i ett format som kan infogas direkt i Glyphs-appen. Huvudmålet är **hastighet och enkelhet** — detta ska vara det snabbaste sättet att påbörja ett nytt pixelteckensnitt, inte ett fullfjädrat typdesign-verktyg.
+Experimental application with hopes of creating a seamless pixelated (for now) alphabetic character creator. You will be given the choice of drawing your characters on grids (16x16, 32x32, 64x64 and 128x128) and then seamlessly exporting the newly created characters into glyphs.
