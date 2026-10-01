@@ -1,0 +1,26 @@
+{
+  "name": "pixel-font-editor",
+  "version": "1.0.0",
+  "description": "Ett verktyg för att snabbt rita pixelerade bokstäver (glyphs) på ett rutnät och exportera dem i ett format som kan infogas direkt i Glyphs-appen. Huvudmålet är **hastighet och enkelhet** — detta ska vara det snabbaste sättet att påbörja ett nytt pixelteckensnitt, inte ett fullfjädrat typdesign-verktyg.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "dev": "vite"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oilvrs/pixel-font-editor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/oilvrs/pixel-font-editor/issues"
+  },
+  "homepage": "https://github.com/oilvrs/pixel-font-editor#readme",
+  "devDependencies": {
+    "prettier": "^3.9.9",
+    "vite": "^8.3.2"
+  }
+}
