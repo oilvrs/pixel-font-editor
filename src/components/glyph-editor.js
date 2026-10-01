@@ -11,12 +11,22 @@
 
 import { createGrid, clearGrid, isEmpty, drawLine } from '../core/grid.js'
 import { createHistory, pushState, undoState, redoState } from '../core/history.js'
+import { getMetrics } from '../metrics.js'
 
 // Cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
 const CELL_PX = { 8: 64, 16: 32, 32: 20, 64: 12, 128: 7 }
 
 // A darker grid line is drawn every N cells, as a counting aid.
 const MAJOR_EVERY = { 8: 4, 16: 4, 32: 8, 64: 8, 128: 8 }
+
+// Guide line colors
+const GUIDE_COLORS = {
+  ascender: '#7a7a7a',
+  capHeight: '#0000ff',
+  xHeight: '#06a94d',
+  baseline: '#ff0000',
+  descender: '#7a7a7a',
+}
 
 class GlyphEditor extends HTMLElement {
   constructor() {
@@ -25,6 +35,7 @@ class GlyphEditor extends HTMLElement {
     this.size = 32 // Active grid size
     this.sessions = new Map() // size -> { grid, history }, created on first use
     this.tool = 'pen' // 'pen' or 'eraser'
+    this.showGuides = true // Guide lines on or off
     this.drawing = false // True while a stroke is in progress
     this.erasing = false // Locked at pointerdown, so a stroke never switches mode
     this.lastCell = null // Previous cell of the stroke, used to interpolate
@@ -82,7 +93,7 @@ class GlyphEditor extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          font-family: "vt323", sans-serif;
           padding: 2rem;
           max-width: 1200px;
           margin: 0 auto;
@@ -101,6 +112,28 @@ class GlyphEditor extends HTMLElement {
           touch-action: none;
         }
 
+                .legend {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem 1.25rem;
+          font-size: 1.2rem;
+          color: #000000;
+          margin: 0.75rem 0 0 0;
+        }
+
+        .legend.hidden {
+          display: none;
+        }
+
+        .key::before {
+          content: '';
+          display: inline-block;
+          width: 1.5rem;
+          border-top: 2px solid var(--c);
+          margin-right: 0.5rem;
+          vertical-align: middle;
+        }
+
         .notice {
           font-size: 0.85rem;
           color: #000000;
@@ -109,10 +142,16 @@ class GlyphEditor extends HTMLElement {
         }
       </style>
 
-      <glyph-toolbar tool="${this.tool}" size="${this.size}"></glyph-toolbar>
+            <glyph-toolbar tool="${this.tool}" size="${this.size}" guides="${this.showGuides ? 'on' : 'off'}"></glyph-toolbar>
       <div class="stage">
         <canvas id="canvas" class="canvas"></canvas>
       </div>
+      <p class="legend" id="legend">
+        <span class="key" style="--c: #ff0000">baseline</span>
+        <span class="key" style="--c: #0000ff">cap-height</span>
+        <span class="key" style="--c: #06a94d">x-height</span>
+        <span class="key" style="--c: #7a7a7a">ascender / descender</span>
+      </p>
       <p class="notice" id="notice"></p>
     `
   }
@@ -133,6 +172,7 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('tool-change', (e) => this.setTool(e.detail.tool))
     toolbar.addEventListener('size-change', (e) => this.setSize(e.detail.size))
     toolbar.addEventListener('clear', () => this.clear())
+    toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
 
     document.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('resize', this.onResize) // Browser zoom changes the pixel density
@@ -174,7 +214,7 @@ class GlyphEditor extends HTMLElement {
     const rect = e.currentTarget.getBoundingClientRect()
     return {
       x: Math.floor(((e.clientX - rect.left) / rect.width) * this.size),
-      y: Math.floor(((e.clientY - rect.top) / rect.height) * this.size)
+      y: Math.floor(((e.clientY - rect.top) / rect.height) * this.size),
     }
   }
 
@@ -212,7 +252,14 @@ class GlyphEditor extends HTMLElement {
     const cell = this.cellFromEvent(e)
     if (cell.x === this.lastCell.x && cell.y === this.lastCell.y) return
 
-    const changed = drawLine(this.grid, this.lastCell.x, this.lastCell.y, cell.x, cell.y, !this.erasing)
+    const changed = drawLine(
+      this.grid,
+      this.lastCell.x,
+      this.lastCell.y,
+      cell.x,
+      cell.y,
+      !this.erasing
+    )
     this.lastCell = cell
 
     if (changed) {
@@ -296,6 +343,37 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
+   * Turns the guide lines on or off.
+   */
+  toggleGuides() {
+    this.showGuides = !this.showGuides
+    this.shadowRoot
+      .querySelector('glyph-toolbar')
+      .setAttribute('guides', this.showGuides ? 'on' : 'off')
+    this.shadowRoot.getElementById('legend').classList.toggle('hidden', !this.showGuides)
+    this.draw()
+  }
+
+  /**
+   * Draws the guide lines on top of the pixels, centered on their row
+   * boundary. Lines at the grid edge are kept inside the canvas.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} size - grid size
+   * @param {number} cell - cell size in device pixels
+   * @param {number} line - grid line width in device pixels
+   * @param {number} total - canvas size in device pixels
+   */
+  drawGuides(ctx, size, cell, line, total) {
+    const thickness = line * 2
+
+    for (const [name, row] of Object.entries(getMetrics(size))) {
+      ctx.fillStyle = GUIDE_COLORS[name]
+      const pos = Math.min(Math.max(row * cell - line, 0), total - thickness)
+      ctx.fillRect(0, pos, total, thickness)
+    }
+  }
+
+  /**
    * Shows a passive text line under the canvas. At 16×16 and below, fine
    * details can disappear.
    */
@@ -347,6 +425,7 @@ class GlyphEditor extends HTMLElement {
       for (let x = 0; x < size; x++) {
         if (pixels[y * size + x]) ctx.fillRect(x * cell, y * cell, cell, cell)
       }
+      if (this.showGuides) this.drawGuides(ctx, size, cell, line, total)
     }
   }
 }

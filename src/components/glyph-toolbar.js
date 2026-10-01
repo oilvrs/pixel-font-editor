@@ -11,7 +11,7 @@
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'size']
+    return ['tool', 'size', 'guides']
   }
 
   constructor() {
@@ -43,7 +43,12 @@ class GlyphToolbar extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          font-family: "vt323" sans-serif;
+        }
+
+        .h1 {
+            font-size:3rem;
+            font-weight:100;
         }
 
         .row {
@@ -55,12 +60,11 @@ class GlyphToolbar extends HTMLElement {
         }
 
         .row:last-child {
-          border-bottom: 1px solid #000000;
           margin-bottom: 1.5rem;
         }
 
         .label {
-          font-size: 0.9rem;
+          font-size: 1.5rem;
           color: #000000;
           min-width: 3rem;
         }
@@ -75,7 +79,8 @@ class GlyphToolbar extends HTMLElement {
           background: transparent;
           color: #000000;
           border: 1px solid #000000;
-          font-weight: 400;
+          font-family: "vt323" sans-serif;
+          font-weight: 200;
           padding: 0.5rem 1rem;
           cursor: pointer;
           font-size: 0.85rem;
@@ -94,11 +99,14 @@ class GlyphToolbar extends HTMLElement {
         }
       </style>
 
+      <h1>pixelated glyph editor & exporter version 1.0<h1>
+
       <div class="row">
         <span class="label">tool:</span>
         <button data-tool="pen">pen</button>
         <button data-tool="eraser">eraser</button>
         <button id="clearBtn">clear</button>
+         <button id="guidesBtn">guides</button>
         <span class="hint">draw: click and drag · erase: right click or shift</span>
       </div>
       <div class="row">
@@ -121,10 +129,15 @@ class GlyphToolbar extends HTMLElement {
     })
 
     this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () => this.emit('size-change', { size: parseInt(btn.dataset.size) }))
+      btn.addEventListener('click', () =>
+        this.emit('size-change', { size: parseInt(btn.dataset.size) })
+      )
     })
 
     this.shadowRoot.getElementById('clearBtn').addEventListener('click', () => this.emit('clear'))
+    this.shadowRoot
+      .getElementById('guidesBtn')
+      .addEventListener('click', () => this.emit('guides-toggle'))
   }
 
   /**
@@ -142,6 +155,8 @@ class GlyphToolbar extends HTMLElement {
   updateActive() {
     const tool = this.getAttribute('tool')
     const size = this.getAttribute('size')
+    const guidesBtn = this.shadowRoot.getElementById('guidesBtn')
+    if (guidesBtn) guidesBtn.classList.toggle('active', this.getAttribute('guides') === 'on')
 
     this.shadowRoot.querySelectorAll('[data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === tool)
