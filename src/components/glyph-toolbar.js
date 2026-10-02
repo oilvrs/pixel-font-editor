@@ -128,8 +128,8 @@ class GlyphToolbar extends HTMLElement {
           <button data-size="128">128×128</button>
         </div>
       </div>
-      <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, drag inside it to move · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − +</p>
-    `
+      <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shift: keep proportions, snap rotation to 45° · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − +</p>    
+      `
   }
 
   /**
