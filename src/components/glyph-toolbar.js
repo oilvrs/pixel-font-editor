@@ -1,17 +1,20 @@
 /**
  * Toolbar for the glyph editor.
- * Stateless: the active tool and grid size are set through the `tool` and
- * `size` attributes. User actions are sent as events:
- * - tool-change { tool: 'pen' | 'eraser' }
+ * Stateless: the active tool, grid size, guides state and brush size are set
+ * through the `tool`, `size`, `guides` and `brush` attributes. User actions
+ * are sent as events:
+ * - tool-change { tool: 'pen' | 'eraser' | 'select' }
  * - size-change { size: number }
+ * - brush-step { delta: 1 | -1 }
+ * - guides-toggle
  * - clear
  *
- * @version 0.1.0
+ * @version 0.3.0
  */
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'size', 'guides']
+    return ['tool', 'size', 'guides', 'brush']
   }
 
   constructor() {
@@ -43,12 +46,12 @@ class GlyphToolbar extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: "vt323" sans-serif;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
         }
 
-        .h1 {
-            font-size:3rem;
-            font-weight:100;
+        .panel {
+          border-bottom: 1px solid #000000;
+          margin-bottom: 0.75rem;
         }
 
         .row {
@@ -59,28 +62,30 @@ class GlyphToolbar extends HTMLElement {
           border-top: 1px solid #000000;
         }
 
-        .row:last-child {
-          margin-bottom: 1.5rem;
-        }
-
         .label {
-          font-size: 1.5rem;
+          font-size: 0.9rem;
           color: #000000;
           min-width: 3rem;
+        }
+
+        .value {
+          font-size: 0.85rem;
+          color: #000000;
+          min-width: 3rem;
+          text-align: center;
         }
 
         .hint {
           font-size: 0.85rem;
           color: #000000;
-          margin-left: auto;
+          margin: 0 0 1.5rem 0;
         }
 
         button {
           background: transparent;
           color: #000000;
           border: 1px solid #000000;
-          font-family: "vt323" sans-serif;
-          font-weight: 200;
+          font-weight: 400;
           padding: 0.5rem 1rem;
           cursor: pointer;
           font-size: 0.85rem;
@@ -99,24 +104,31 @@ class GlyphToolbar extends HTMLElement {
         }
       </style>
 
-      <h1>pixelated glyph editor & exporter version 1.0<h1>
-
-      <div class="row">
-        <span class="label">tool:</span>
-        <button data-tool="pen">pen</button>
-        <button data-tool="eraser">eraser</button>
-        <button id="clearBtn">clear</button>
-         <button id="guidesBtn">guides</button>
-        <span class="hint">draw: click and drag · erase: right click or shift</span>
+      <div class="panel">
+        <div class="row">
+          <span class="label">tool:</span>
+          <button data-tool="pen" title="pen (B)">pen</button>
+          <button data-tool="eraser" title="eraser (E)">eraser</button>
+          <button data-tool="select" title="select (M)">select</button>
+          <button id="clearBtn">clear</button>
+          <button id="guidesBtn">guides</button>
+        </div>
+        <div class="row">
+          <span class="label">brush:</span>
+          <button id="brushDownBtn" title="smaller ( [ or - )">−</button>
+          <span class="value" id="brushValue">1 px</span>
+          <button id="brushUpBtn" title="larger ( ] or + )">+</button>
+        </div>
+        <div class="row">
+          <span class="label">grid:</span>
+          <button data-size="8">8×8</button>
+          <button data-size="16">16×16</button>
+          <button data-size="32">32×32</button>
+          <button data-size="64">64×64</button>
+          <button data-size="128">128×128</button>
+        </div>
       </div>
-      <div class="row">
-        <span class="label">grid:</span>
-        <button data-size="8">8×8</button>
-        <button data-size="16">16×16</button>
-        <button data-size="32">32×32</button>
-        <button data-size="64">64×64</button>
-        <button data-size="128">128×128</button>
-      </div>
+      <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, drag inside it to move · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − +</p>
     `
   }
 
@@ -134,6 +146,12 @@ class GlyphToolbar extends HTMLElement {
       )
     })
 
+    this.shadowRoot
+      .getElementById('brushDownBtn')
+      .addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
+    this.shadowRoot
+      .getElementById('brushUpBtn')
+      .addEventListener('click', () => this.emit('brush-step', { delta: 1 }))
     this.shadowRoot.getElementById('clearBtn').addEventListener('click', () => this.emit('clear'))
     this.shadowRoot
       .getElementById('guidesBtn')
@@ -150,13 +168,12 @@ class GlyphToolbar extends HTMLElement {
   }
 
   /**
-   * Marks the buttons that match the current tool and size attributes.
+   * Marks the buttons that match the current attributes and shows the
+   * brush size.
    */
   updateActive() {
     const tool = this.getAttribute('tool')
     const size = this.getAttribute('size')
-    const guidesBtn = this.shadowRoot.getElementById('guidesBtn')
-    if (guidesBtn) guidesBtn.classList.toggle('active', this.getAttribute('guides') === 'on')
 
     this.shadowRoot.querySelectorAll('[data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === tool)
@@ -165,6 +182,12 @@ class GlyphToolbar extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.size === size)
     })
+
+    const guidesBtn = this.shadowRoot.getElementById('guidesBtn')
+    if (guidesBtn) guidesBtn.classList.toggle('active', this.getAttribute('guides') === 'on')
+
+    const brushValue = this.shadowRoot.getElementById('brushValue')
+    if (brushValue) brushValue.textContent = `${this.getAttribute('brush') || 1} px`
   }
 }
 

@@ -173,7 +173,44 @@ export function deserializeGrid(data) {
  * @param {number|boolean} value - truthy fills, falsy erases
  * @returns {boolean} true if any pixel changed
  */
-export function drawLine(grid, x0, y0, x1, y1, value) {
+/**
+ * Fills or erases a square brush centered on a cell. For even sizes the
+ * extra row and column go to the right and below. Cells outside the grid
+ * are skipped.
+ * @param {Object} grid
+ * @param {number} x
+ * @param {number} y
+ * @param {number|boolean} value - truthy fills, falsy erases
+ * @param {number} brushSize - side of the square, in cells
+ * @returns {boolean} true if any pixel changed
+ */
+export function stampBrush(grid, x, y, value, brushSize = 1) {
+  const offset = Math.floor(brushSize / 2)
+  let changed = false
+
+  for (let dy = 0; dy < brushSize; dy++) {
+    for (let dx = 0; dx < brushSize; dx++) {
+      if (setPixel(grid, x - offset + dx, y - offset + dy, value)) changed = true
+    }
+  }
+
+  return changed
+}
+
+/**
+ * Draws or erases a straight line between two cells (Bresenham), endpoints
+ * included. Cells outside the grid are skipped, so a line may start or end
+ * outside it.
+ * @param {Object} grid
+ * @param {number} x0
+ * @param {number} y0
+ * @param {number} x1
+ * @param {number} y1
+ * @param {number|boolean} value - truthy fills, falsy erases
+ * @param {number} brushSize - side of the square brush, in cells
+ * @returns {boolean} true if any pixel changed
+ */
+export function drawLine(grid, x0, y0, x1, y1, value, brushSize = 1) {
   let changed = false
   const dx = Math.abs(x1 - x0)
   const dy = -Math.abs(y1 - y0)
@@ -184,7 +221,7 @@ export function drawLine(grid, x0, y0, x1, y1, value) {
   let y = y0
 
   while (true) {
-    if (setPixel(grid, x, y, value)) changed = true
+    if (stampBrush(grid, x, y, value, brushSize)) changed = true
     if (x === x1 && y === y1) break
 
     const doubled = 2 * error
@@ -199,4 +236,84 @@ export function drawLine(grid, x0, y0, x1, y1, value) {
   }
 
   return changed
+}
+
+/**
+ * Copies a rectangle out of the grid. Cells outside the grid become 0.
+ * @param {Object} grid
+ * @param {number} x - left edge
+ * @param {number} y - top edge
+ * @param {number} width
+ * @param {number} height
+ * @returns {Object} { width, height, pixels }
+ */
+export function extractRegion(grid, x, y, width, height) {
+  const pixels = new Uint8Array(width * height)
+
+  for (let ry = 0; ry < height; ry++) {
+    for (let rx = 0; rx < width; rx++) {
+      pixels[ry * width + rx] = getPixel(grid, x + rx, y + ry)
+    }
+  }
+
+  return { width, height, pixels }
+}
+
+/**
+ * Adds the filled pixels of a region to the grid. Empty pixels in the region
+ * are transparent: they do not erase what is already there. Pixels that land
+ * outside the grid are skipped.
+ * @param {Object} grid
+ * @param {Object} region - { width, height, pixels }
+ * @param {number} x - left edge
+ * @param {number} y - top edge
+ * @returns {boolean} true if any pixel changed
+ */
+export function pasteRegion(grid, region, x, y) {
+  let changed = false
+
+  for (let ry = 0; ry < region.height; ry++) {
+    for (let rx = 0; rx < region.width; rx++) {
+      if (region.pixels[ry * region.width + rx] && setPixel(grid, x + rx, y + ry, 1)) changed = true
+    }
+  }
+
+  return changed
+}
+
+/**
+ * Empties a rectangle of the grid. Cells outside the grid are skipped.
+ * @param {Object} grid
+ * @param {number} x - left edge
+ * @param {number} y - top edge
+ * @param {number} width
+ * @param {number} height
+ * @returns {boolean} true if any pixel changed
+ */
+export function clearRegion(grid, x, y, width, height) {
+  let changed = false
+
+  for (let ry = 0; ry < height; ry++) {
+    for (let rx = 0; rx < width; rx++) {
+      if (setPixel(grid, x + rx, y + ry, 0)) changed = true
+    }
+  }
+
+  return changed
+}
+
+/**
+ * Checks if two pixel arrays have identical contents.
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ * @returns {boolean}
+ */
+export function pixelsEqual(a, b) {
+  if (a.length !== b.length) return false
+
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+
+  return true
 }
