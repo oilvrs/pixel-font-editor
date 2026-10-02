@@ -25,18 +25,22 @@ import {
   extractRegion,
   pasteRegion,
   clearRegion,
-  pixelsEqual
+  pixelsEqual,
 } from '../core/grid.js'
 import { createHistory, pushState, undoState, redoState } from '../core/history.js'
-import { getMetrics } from '../metrics.js'
+import { getMetrics, defaultAdvance } from '../metrics.js'
 import {
   renderTransformed,
   toLocal,
   fromLocal,
   transformCorners,
   resizeTransform,
-  rotatedAngle
+  rotatedAngle,
 } from '../core/transform.js'
+import { buildSvg, inkBounds } from '../core/export-svg.js'
+import { glyphName, exportFileName } from '../core/glyph-names.js'
+import { gridToPngBlob } from '../utils/export-png.js'
+import { downloadText, downloadBlob } from '../utils/download.js'
 
 // Cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
 const CELL_PX = { 8: 64, 16: 32, 32: 20, 64: 12, 128: 7 }
@@ -50,8 +54,10 @@ const GUIDE_COLORS = {
   capHeight: '#0000ff',
   xHeight: '#06a94d',
   baseline: '#ff0000',
-  descender: '#7a7a7a'
+  descender: '#7a7a7a',
 }
+
+const ADVANCE_COLOR = '#ff00ff' // Advance width guide
 
 const MAX_BRUSH = 32
 
@@ -64,7 +70,7 @@ const HANDLES = [
   [0, -1],
   [1, 0],
   [0, 1],
-  [-1, 0]
+  [-1, 0],
 ]
 
 const HANDLE_DRAW_CSS = 8 // Drawn handle size, CSS px
@@ -133,6 +139,10 @@ class GlyphEditor extends HTMLElement {
     this.tool = 'pen' // 'pen', 'eraser' or 'select'
     this.showGuides = true // Guide lines on or off
     this.brushSize = 1 // Side of the square brush, in cells
+    this.glyphChar = '' // Character of the glyph being drawn, used for the file name
+    this.pngTransparent = true // PNG background: transparent or white
+    this.message = '' // Short message about the last action, shown under the canvas
+    this.messageTimer = null
 
     this.dragMode = null // null, 'stroke', 'marquee', 'liftpending', 'move', 'resize' or 'rotate'
     this.erasing = false // Locked at pointerdown, so a stroke never switches mode
@@ -160,7 +170,11 @@ class GlyphEditor extends HTMLElement {
    */
   get session() {
     if (!this.sessions.has(this.size)) {
-      this.sessions.set(this.size, { grid: createGrid(this.size), history: createHistory() })
+      this.sessions.set(this.size, {
+        grid: createGrid(this.size),
+        history: createHistory(),
+        advance: defaultAdvance(this.size), // Advance width in pixels
+      })
     }
     return this.sessions.get(this.size)
   }
@@ -189,6 +203,7 @@ class GlyphEditor extends HTMLElement {
   disconnectedCallback() {
     document.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('resize', this.onResize)
+    clearTimeout(this.messageTimer)
   }
 
   /**
@@ -250,10 +265,12 @@ class GlyphEditor extends HTMLElement {
         }
       </style>
 
-      <glyph-toolbar
+            <glyph-toolbar
         tool="${this.tool}"
         size="${this.size}"
         brush="${this.brushSize}"
+        advance="${this.session.advance}"
+        png-bg="${this.pngTransparent ? 'transparent' : 'white'}"
         guides="${this.showGuides ? 'on' : 'off'}"
       ></glyph-toolbar>
       <div class="stage">
@@ -264,6 +281,7 @@ class GlyphEditor extends HTMLElement {
         <span class="key" style="--c: #0000ff">cap-height</span>
         <span class="key" style="--c: #06a94d">x-height</span>
         <span class="key" style="--c: #7a7a7a">ascender / descender</span>
+        <span class="key" style="--c: #ff00ff">advance width</span>
       </p>
       <p class="notice" id="notice"></p>
     `
@@ -288,6 +306,10 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('brush-step', (e) => this.changeBrush(e.detail.delta))
     toolbar.addEventListener('clear', () => this.clear())
     toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
+    toolbar.addEventListener('glyph-change', (e) => this.setGlyph(e.detail.char))
+    toolbar.addEventListener('advance-step', (e) => this.changeAdvance(e.detail.delta))
+    toolbar.addEventListener('png-bg-toggle', () => this.togglePngBackground())
+    toolbar.addEventListener('export', (e) => this.exportGlyph(e.detail.format))
 
     document.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('resize', this.onResize) // Browser zoom changes the pixel density
@@ -344,7 +366,7 @@ class GlyphEditor extends HTMLElement {
 
       this.updateFloating({
         cx: this.floating.cx + arrows[key][0],
-        cy: this.floating.cy + arrows[key][1]
+        cy: this.floating.cy + arrows[key][1],
       })
       this.draw()
     } else if (key === '[' || key === '-') {
@@ -378,7 +400,7 @@ class GlyphEditor extends HTMLElement {
     const rect = e.currentTarget.getBoundingClientRect()
     return {
       x: ((e.clientX - rect.left) / rect.width) * this.size,
-      y: ((e.clientY - rect.top) / rect.height) * this.size
+      y: ((e.clientY - rect.top) / rect.height) * this.size,
     }
   }
 
@@ -399,7 +421,8 @@ class GlyphEditor extends HTMLElement {
   setHover(cell) {
     const inside = cell.x >= 0 && cell.y >= 0 && cell.x < this.size && cell.y < this.size
     const next = inside ? cell : null
-    const same = next && this.hoverCell && next.x === this.hoverCell.x && next.y === this.hoverCell.y
+    const same =
+      next && this.hoverCell && next.x === this.hoverCell.x && next.y === this.hoverCell.y
 
     if (same || (!next && !this.hoverCell)) return false
 
@@ -480,7 +503,12 @@ class GlyphEditor extends HTMLElement {
 
     if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfH) return { type: 'move' }
 
-    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    for (const [sx, sy] of [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ]) {
       const dx = (local.x - sx * halfW) * css
       const dy = (local.y - sy * halfH) * css
       if (Math.hypot(dx, dy) <= ROTATE_ZONE_CSS) return { type: 'rotate' }
@@ -499,7 +527,14 @@ class GlyphEditor extends HTMLElement {
     const { cx, cy, w, h, angle } = this.floating
 
     this.dragMode = hit.type
-    this.dragStart = { type: hit.type, point, cell, transform: { cx, cy, w, h, angle }, hx: hit.hx, hy: hit.hy }
+    this.dragStart = {
+      type: hit.type,
+      point,
+      cell,
+      transform: { cx, cy, w, h, angle },
+      hx: hit.hx,
+      hy: hit.hy,
+    }
   }
 
   /**
@@ -513,6 +548,7 @@ class GlyphEditor extends HTMLElement {
     if (e.button === 1) return // Ignore middle click
 
     e.preventDefault()
+    this.shadowRoot.querySelector('glyph-toolbar').blurInputs() // Shortcuts work again after typing in the glyph field
     e.currentTarget.setPointerCapture(e.pointerId) // Keeps the drag going outside the canvas
 
     const point = this.pointFromEvent(e)
@@ -572,7 +608,10 @@ class GlyphEditor extends HTMLElement {
     this.hoverPoint = point
     let redraw = this.setHover(cell)
 
-    if (this.dragMode === 'liftpending' && (cell.x !== this.liftStart.x || cell.y !== this.liftStart.y)) {
+    if (
+      this.dragMode === 'liftpending' &&
+      (cell.x !== this.liftStart.x || cell.y !== this.liftStart.y)
+    ) {
       this.liftSelection()
       this.beginTransform({ type: 'move' }, this.liftPoint, this.liftStart)
       redraw = true
@@ -580,7 +619,15 @@ class GlyphEditor extends HTMLElement {
 
     if (this.dragMode === 'stroke') {
       if (cell.x !== this.lastCell.x || cell.y !== this.lastCell.y) {
-        const changed = drawLine(this.grid, this.lastCell.x, this.lastCell.y, cell.x, cell.y, !this.erasing, this.brushSize)
+        const changed = drawLine(
+          this.grid,
+          this.lastCell.x,
+          this.lastCell.y,
+          cell.x,
+          cell.y,
+          !this.erasing,
+          this.brushSize
+        )
         this.lastCell = cell
 
         if (changed) {
@@ -598,7 +645,7 @@ class GlyphEditor extends HTMLElement {
       const { cell: startCell, transform } = this.dragStart
       this.updateFloating({
         cx: transform.cx + (cell.x - startCell.x),
-        cy: transform.cy + (cell.y - startCell.y)
+        cy: transform.cy + (cell.y - startCell.y),
       })
       redraw = true
     } else if (this.dragMode === 'resize') {
@@ -690,7 +737,7 @@ class GlyphEditor extends HTMLElement {
       angle: 0,
       before: null, // A paste has no lift, so the undo state is taken when it is placed
       origin: null,
-      cache: null
+      cache: null,
     }
 
     this.updateNotice()
@@ -719,7 +766,7 @@ class GlyphEditor extends HTMLElement {
       angle: 0,
       before: grid.pixels.slice(), // Restored on cancel, pushed to history on place
       origin: this.selection,
-      cache: null
+      cache: null,
     }
 
     clearRegion(grid, x, y, width, height)
@@ -854,7 +901,9 @@ class GlyphEditor extends HTMLElement {
     this.selection = null
     this.hoverCell = null
     this.hoverPoint = null
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('size', size)
+    const toolbar = this.shadowRoot.querySelector('glyph-toolbar')
+    toolbar.setAttribute('size', size)
+    toolbar.setAttribute('advance', this.session.advance)
     this.updateNotice()
     this.draw()
   }
@@ -889,22 +938,117 @@ class GlyphEditor extends HTMLElement {
    */
   toggleGuides() {
     this.showGuides = !this.showGuides
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('guides', this.showGuides ? 'on' : 'off')
+    this.shadowRoot
+      .querySelector('glyph-toolbar')
+      .setAttribute('guides', this.showGuides ? 'on' : 'off')
     this.shadowRoot.getElementById('legend').classList.toggle('hidden', !this.showGuides)
     this.draw()
   }
 
   /**
-   * Shows a passive text line under the canvas: the size and angle of
-   * floating pixels, and a note about low resolution.
+   * Sets the character of the glyph, which decides the file name on export.
+   * @param {string} char
+   */
+  setGlyph(char) {
+    this.glyphChar = char
+    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('glyph', char)
+  }
+
+  /**
+   * Makes the advance width of the active grid wider or narrower.
+   * @param {number} delta - 1 or -1, in pixels
+   */
+  changeAdvance(delta) {
+    const session = this.session
+    session.advance = clamp(session.advance + delta, 1, this.size)
+
+    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('advance', session.advance)
+    this.draw()
+  }
+
+  /**
+   * Switches the PNG background between transparent and white.
+   */
+  togglePngBackground() {
+    this.pngTransparent = !this.pngTransparent
+    this.shadowRoot
+      .querySelector('glyph-toolbar')
+      .setAttribute('png-bg', this.pngTransparent ? 'transparent' : 'white')
+  }
+
+  /**
+   * Shows a short message under the canvas for a few seconds.
+   * @param {string} text
+   */
+  flash(text) {
+    this.message = text
+    this.updateNotice()
+
+    clearTimeout(this.messageTimer)
+    this.messageTimer = setTimeout(() => {
+      this.message = ''
+      this.updateNotice()
+    }, 4000)
+  }
+
+  /**
+   * Saves the active drawing as an SVG or PNG file. Floating pixels are
+   * placed first. The file name comes from the glyph character.
+   * @param {string} format - 'svg' or 'png'
+   */
+  async exportGlyph(format) {
+    this.commitFloating()
+
+    const { grid, advance } = this.session
+
+    if (isEmpty(grid)) {
+      this.flash('nothing to export: the drawing is empty')
+      return
+    }
+
+    const name = glyphName(this.glyphChar)
+    if (!name) {
+      this.flash('type the glyph character in the glyph field first')
+      return
+    }
+
+    const fileName = exportFileName(name, format)
+
+    if (format === 'svg') {
+      downloadText(buildSvg(grid, { advance }), fileName, 'image/svg+xml')
+    } else {
+      const blob = await gridToPngBlob(grid, { transparent: this.pngTransparent })
+      if (!blob) {
+        this.flash('could not create the PNG')
+        return
+      }
+      downloadBlob(blob, fileName)
+    }
+
+    this.flash(`saved ${fileName}`)
+  }
+
+  /**
+   * Shows a passive text line under the canvas: the last message, the size
+   * and angle of floating pixels, a warning if the ink passes the advance
+   * width, and a note about low resolution.
    */
   updateNotice() {
     const parts = []
 
+    if (this.message) parts.push(this.message)
+
     if (this.floating) {
       const { w, h, angle } = this.floating
-      parts.push(`floating ${Math.abs(w)}×${Math.abs(h)} px, ${degrees(angle)}° · enter to place, esc to cancel`)
+      parts.push(
+        `floating ${Math.abs(w)}×${Math.abs(h)} px, ${degrees(angle)}° · enter to place, esc to cancel`
+      )
     }
+
+    const bounds = inkBounds(this.grid)
+    if (bounds && bounds.maxX + 1 > this.session.advance)
+      parts.push('the drawing extends past the advance width')
+
     if (this.size <= 16) parts.push('low resolution: fine details can disappear')
 
     this.shadowRoot.getElementById('notice').textContent = parts.join(' · ')
@@ -990,11 +1134,13 @@ class GlyphEditor extends HTMLElement {
 
     this.drawHover(view)
     this.updateCursor()
+    this.updateNotice()
   }
 
   /**
-   * Draws the guide lines on top of the pixels, centered on their row
-   * boundary. Lines at the grid edge are kept inside the canvas.
+   * Draws the guide lines on top of the pixels: the font metrics as
+   * horizontal lines and the advance width as a vertical line. Lines are
+   * centered on their row or column boundary and kept inside the canvas.
    * @param {Object} view - { ctx, size, cell, line, total, dpr }
    */
   drawGuides({ ctx, size, cell, line, total }) {
@@ -1005,6 +1151,10 @@ class GlyphEditor extends HTMLElement {
       const pos = Math.min(Math.max(row * cell - line, 0), total - thickness)
       ctx.fillRect(0, pos, total, thickness)
     }
+
+    const advanceX = Math.min(Math.max(this.session.advance * cell - line, 0), total - thickness)
+    ctx.fillStyle = ADVANCE_COLOR
+    ctx.fillRect(advanceX, 0, thickness, total)
   }
 
   /**
@@ -1141,7 +1291,8 @@ class GlyphEditor extends HTMLElement {
     const right = Math.min(size, this.hoverCell.x - offset + this.brushSize)
     const bottom = Math.min(size, this.hoverCell.y - offset + this.brushSize)
 
-    ctx.fillStyle = this.erasing || this.tool === 'eraser' ? 'rgba(255, 0, 0, 0.35)' : 'rgba(128, 128, 128, 0.5)'
+    ctx.fillStyle =
+      this.erasing || this.tool === 'eraser' ? 'rgba(255, 0, 0, 0.35)' : 'rgba(128, 128, 128, 0.5)'
     ctx.fillRect(left * cell, top * cell, (right - left) * cell, (bottom - top) * cell)
   }
 }

@@ -19,7 +19,7 @@ const GUIDES_IN_EIGHTHS = {
   capHeight: 1,
   xHeight: 3,
   baseline: 7,
-  descender: 8
+  descender: 8,
 }
 
 /**
@@ -50,4 +50,12 @@ export function getMetrics(size) {
   }
 
   return metrics
+}
+/**
+ * Default advance width for a grid size, in pixels: 5/8 of the grid width.
+ * @param {number} size - 8, 16, 32, 64 or 128
+ * @returns {number}
+ */
+export function defaultAdvance(size) {
+  return Math.round((size * 5) / 8)
 }
