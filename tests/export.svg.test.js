@@ -15,6 +15,7 @@ function gridFrom(rows, size = 16) {
 
 const pathOf = (svg) => svg.match(/ d="([^"]*)"/)[1]
 const viewBoxOf = (svg) => svg.match(/viewBox="([^"]*)"/)[1]
+const numbersOf = (svg) => [...new Set(pathOf(svg).match(/-?\d+/g).map(Number))].sort((a, b) => a - b)
 
 /**
  * Reads one subpath (M, H, V commands) back into points.
@@ -55,34 +56,50 @@ const subpaths = (svg) =>
     .filter(Boolean)
 
 test('a single pixel on 16x16 is written in font units, origin at the baseline', () => {
-  const grid = gridFrom(['', '', '', '..#'])
-  const svg = buildSvg(grid, { advance: 10 })
+  const grid = gridFrom(['', '', '', '..#']) // Column 2, row 3
+  const svg = buildSvg(grid, { margin: 1 })
 
-  assert.equal(viewBoxOf(svg), '0 -1792 1280 2048')
+  assert.equal(viewBoxOf(svg), '0 -1792 384 2048') // Width: margin 1 + ink 1 + margin 1 = 3 px = 384 units
   assert.ok(svg.includes('fill-rule="evenodd"'))
-
-  const numbers = [...new Set(pathOf(svg).match(/-?\d+/g).map(Number))].sort((a, b) => a - b)
-  assert.deepEqual(numbers, [-1408, -1280, 256, 384])
+  assert.deepEqual(numbersOf(svg), [-1408, -1280, 128, 256]) // Moved left so the ink starts 1 px from x = 0
 })
 
 test('origin top puts (0, 0) in the top left corner', () => {
-  const grid = gridFrom(['', '', '', '..#'])
-  const svg = buildSvg(grid, { advance: 10, origin: 'top' })
+  const svg = buildSvg(gridFrom(['', '', '', '..#']), { margin: 1, origin: 'top' })
 
-  assert.equal(viewBoxOf(svg), '0 0 1280 2048')
-
-  const numbers = [...new Set(pathOf(svg).match(/-?\d+/g).map(Number))].sort((a, b) => a - b)
-  assert.deepEqual(numbers, [256, 384, 512])
+  assert.equal(viewBoxOf(svg), '0 0 384 2048')
+  assert.deepEqual(numbersOf(svg), [128, 256, 384, 512])
 })
 
 test('the units per pixel follow the grid size', () => {
-  const svg = buildSvg(gridFrom(['#'], 8), { advance: 5 })
-  assert.equal(viewBoxOf(svg), '0 -1792 1280 2048') // 256 units per pixel, baseline at row 7
+  const svg = buildSvg(gridFrom(['#'], 8), { margin: 1 })
+  assert.equal(viewBoxOf(svg), '0 -1792 768 2048') // 256 units per pixel, baseline at row 7
+})
+
+test('where the letter is drawn horizontally does not matter', () => {
+  const left = buildSvg(gridFrom(['...#', '...#']), { margin: 2 })
+  const right = buildSvg(gridFrom(['.........#', '.........#']), { margin: 2 })
+
+  assert.equal(left, right)
+})
+
+test('margin 0 gives a tight glyph: the ink starts at x = 0 and fills the width', () => {
+  const svg = buildSvg(gridFrom(['.###']), { margin: 0 })
+
+  assert.equal(viewBoxOf(svg), '0 -1792 384 2048')
+  assert.equal(Math.min(...numbersOf(svg).filter((n) => n >= 0 && n <= 384)), 0)
+})
+
+test('an empty grid gives an empty path and a width of two margins', () => {
+  const svg = buildSvg(createGrid(16), { margin: 2 })
+
+  assert.equal(pathOf(svg), '')
+  assert.equal(viewBoxOf(svg), '0 -1792 512 2048')
 })
 
 test('O: one counter-clockwise outer contour and one clockwise hole', () => {
   const grid = gridFrom(['.####...', '.#..#...', '.#..#...', '.####...'])
-  const parts = subpaths(buildSvg(grid, { advance: 10 })).map(parseSubpath)
+  const parts = subpaths(buildSvg(grid, { margin: 1 })).map(parseSubpath)
 
   assert.equal(parts.length, 2)
 
@@ -93,7 +110,7 @@ test('O: one counter-clockwise outer contour and one clockwise hole', () => {
 
 test('every subpath is closed and uses only horizontal and vertical moves', () => {
   const grid = gridFrom(['#####...', '#...#...', '#####...', '#...#...', '#####...'])
-  const svg = buildSvg(grid, { advance: 10 })
+  const svg = buildSvg(grid, { margin: 1 })
 
   assert.equal(subpaths(svg).length, 3)
   assert.equal((pathOf(svg).match(/Z/g) || []).length, 3)

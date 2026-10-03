@@ -21,7 +21,7 @@
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'size', 'guides', 'brush', 'glyph', 'advance', 'png-bg']
+    return ['tool', 'size', 'guides', 'brush', 'glyph', 'margin', 'png-bg']
   }
 
   constructor() {
@@ -164,10 +164,10 @@ class GlyphToolbar extends HTMLElement {
           <span class="label">export:</span>
           <label class="field">glyph <input id="glyphInput" type="text" maxlength="2" autocomplete="off" spellcheck="false" /></label>
           <span class="field">
-            advance
-            <button id="advanceDownBtn" title="narrower">−</button>
-            <span class="value" id="advanceValue">10 px</span>
-            <button id="advanceUpBtn" title="wider">+</button>
+            margin
+            <button id="marginDownBtn" title="smaller side margin">−</button>
+            <span class="value" id="marginValue">2 px</span>
+            <button id="marginUpBtn" title="larger side margin">+</button>
           </span>
           <button id="exportSvgBtn">save svg</button>
           <button id="exportPngBtn">save png</button>
@@ -189,7 +189,9 @@ class GlyphToolbar extends HTMLElement {
     })
 
     this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () => this.emit('size-change', { size: parseInt(btn.dataset.size) }))
+      btn.addEventListener('click', () =>
+        this.emit('size-change', { size: parseInt(btn.dataset.size) })
+      )
     })
 
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
@@ -197,15 +199,17 @@ class GlyphToolbar extends HTMLElement {
     byId('clearBtn').addEventListener('click', () => this.emit('clear'))
     byId('guidesBtn').addEventListener('click', () => this.emit('guides-toggle'))
 
-    byId('advanceDownBtn').addEventListener('click', () => this.emit('advance-step', { delta: -1 }))
-    byId('advanceUpBtn').addEventListener('click', () => this.emit('advance-step', { delta: 1 }))
+    byId('marginDownBtn').addEventListener('click', () => this.emit('margin-step', { delta: -1 }))
+    byId('marginUpBtn').addEventListener('click', () => this.emit('margin-step', { delta: 1 }))
     byId('exportSvgBtn').addEventListener('click', () => this.emit('export', { format: 'svg' }))
     byId('exportPngBtn').addEventListener('click', () => this.emit('export', { format: 'png' }))
     byId('pngBgBtn').addEventListener('click', () => this.emit('png-bg-toggle'))
 
     const input = byId('glyphInput')
     input.addEventListener('focus', () => input.select())
-    input.addEventListener('input', () => this.emit('glyph-change', { char: [...input.value][0] || '' }))
+    input.addEventListener('input', () =>
+      this.emit('glyph-change', { char: [...input.value][0] || '' })
+    )
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === 'Escape') input.blur()
     })
@@ -250,7 +254,7 @@ class GlyphToolbar extends HTMLElement {
 
     byId('guidesBtn').classList.toggle('active', this.getAttribute('guides') === 'on')
     byId('brushValue').textContent = `${this.getAttribute('brush') || 1} px`
-    byId('advanceValue').textContent = `${this.getAttribute('advance') || 0} px`
+    byId('marginValue').textContent = `${this.getAttribute('margin') || 0} px`
     byId('pngBgBtn').textContent = `png: ${this.getAttribute('png-bg') || 'transparent'}`
 
     const glyph = this.getAttribute('glyph') || ''

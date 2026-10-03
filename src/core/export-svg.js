@@ -7,14 +7,17 @@
  * a single <path>. Directions are reversed compared to the trace, so outer
  * contours run counter-clockwise and holes clockwise (PostScript direction).
  *
+ * Horizontal position: where the letter is drawn in the grid does not
+ * matter. The export moves the ink so its left edge is `margin` pixels from
+ * x = 0, and the viewBox width (the advance width) is the ink width plus
+ * `margin` on both sides.
+ *
  * origin 'baseline': (0, 0) is on the baseline, y runs downwards, so
  * everything above the baseline has negative y. The viewBox starts at the
  * ascender.
  * origin 'top': (0, 0) is the top left corner of the em box.
  *
- * The viewBox width is the advance width.
- *
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 import { traceGrid } from './trace.js'
@@ -73,18 +76,30 @@ function contourPath(points, toX, toY) {
  * @param {string} options.origin - 'baseline' (default) or 'top'
  * @returns {string}
  */
-export function buildSvg(grid, { advance, origin = 'baseline' }) {
+/**
+ * Builds the SVG file content for a grid.
+ * @param {Object} grid - { size, pixels }
+ * @param {Object} options
+ * @param {number} options.margin - side margin in pixels, on both sides of the ink
+ * @param {string} options.origin - 'baseline' (default) or 'top'
+ * @returns {string}
+ */
+export function buildSvg(grid, { margin = 0, origin = 'baseline' } = {}) {
   const unit = unitsPerPixel(grid.size)
   const offsetRows = origin === 'baseline' ? getMetrics(grid.size).baseline : 0
 
-  const toX = (px) => px * unit
+  const bounds = inkBounds(grid)
+  const inkWidth = bounds ? bounds.maxX - bounds.minX + 1 : 0
+  const shift = bounds ? margin - bounds.minX : 0 // Puts the left edge of the ink `margin` pixels from x = 0
+
+  const toX = (px) => (px + shift) * unit
   const toY = (py) => (py - offsetRows) * unit
 
   const d = traceGrid(grid)
     .map((contour) => contourPath(contour.points.slice().reverse(), toX, toY))
     .join(' ')
 
-  const width = advance * unit
+  const width = (inkWidth + margin * 2) * unit
   const height = grid.size * unit
   const top = -offsetRows * unit
 

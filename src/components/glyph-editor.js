@@ -28,7 +28,7 @@ import {
   pixelsEqual,
 } from '../core/grid.js'
 import { createHistory, pushState, undoState, redoState } from '../core/history.js'
-import { getMetrics, defaultAdvance } from '../metrics.js'
+import { getMetrics, defaultMargin } from '../metrics.js'
 import {
   renderTransformed,
   toLocal,
@@ -56,8 +56,6 @@ const GUIDE_COLORS = {
   baseline: '#ff0000',
   descender: '#7a7a7a',
 }
-
-const ADVANCE_COLOR = '#ff00ff' // Advance width guide
 
 const MAX_BRUSH = 32
 
@@ -173,7 +171,7 @@ class GlyphEditor extends HTMLElement {
       this.sessions.set(this.size, {
         grid: createGrid(this.size),
         history: createHistory(),
-        advance: defaultAdvance(this.size), // Advance width in pixels
+        margin: defaultMargin(this.size), // Side margin on export, in pixels
       })
     }
     return this.sessions.get(this.size)
@@ -269,7 +267,7 @@ class GlyphEditor extends HTMLElement {
         tool="${this.tool}"
         size="${this.size}"
         brush="${this.brushSize}"
-        advance="${this.session.advance}"
+        margin="${this.session.margin}"
         png-bg="${this.pngTransparent ? 'transparent' : 'white'}"
         guides="${this.showGuides ? 'on' : 'off'}"
       ></glyph-toolbar>
@@ -281,7 +279,6 @@ class GlyphEditor extends HTMLElement {
         <span class="key" style="--c: #0000ff">cap-height</span>
         <span class="key" style="--c: #06a94d">x-height</span>
         <span class="key" style="--c: #7a7a7a">ascender / descender</span>
-        <span class="key" style="--c: #ff00ff">advance width</span>
       </p>
       <p class="notice" id="notice"></p>
     `
@@ -307,7 +304,7 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('clear', () => this.clear())
     toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
     toolbar.addEventListener('glyph-change', (e) => this.setGlyph(e.detail.char))
-    toolbar.addEventListener('advance-step', (e) => this.changeAdvance(e.detail.delta))
+    toolbar.addEventListener('margin-step', (e) => this.changeMargin(e.detail.delta))
     toolbar.addEventListener('png-bg-toggle', () => this.togglePngBackground())
     toolbar.addEventListener('export', (e) => this.exportGlyph(e.detail.format))
 
@@ -903,7 +900,7 @@ class GlyphEditor extends HTMLElement {
     this.hoverPoint = null
     const toolbar = this.shadowRoot.querySelector('glyph-toolbar')
     toolbar.setAttribute('size', size)
-    toolbar.setAttribute('advance', this.session.advance)
+    toolbar.setAttribute('margin', this.session.margin)
     this.updateNotice()
     this.draw()
   }
@@ -955,14 +952,15 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Makes the advance width of the active grid wider or narrower.
+   * Makes the side margin of the active grid larger or smaller. The margin
+   * is added on both sides of the letter on export.
    * @param {number} delta - 1 or -1, in pixels
    */
-  changeAdvance(delta) {
+  changeMargin(delta) {
     const session = this.session
-    session.advance = clamp(session.advance + delta, 1, this.size)
+    session.margin = clamp(session.margin + delta, 0, Math.floor(this.size / 4))
 
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('advance', session.advance)
+    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('margin', session.margin)
     this.draw()
   }
 
@@ -999,7 +997,7 @@ class GlyphEditor extends HTMLElement {
   async exportGlyph(format) {
     this.commitFloating()
 
-    const { grid, advance } = this.session
+    const { grid, margin } = this.session
 
     if (isEmpty(grid)) {
       this.flash('nothing to export: the drawing is empty')
@@ -1015,7 +1013,7 @@ class GlyphEditor extends HTMLElement {
     const fileName = exportFileName(name, format)
 
     if (format === 'svg') {
-      downloadText(buildSvg(grid, { advance }), fileName, 'image/svg+xml')
+      downloadText(buildSvg(grid, { margin }), fileName, 'image/svg+xml')
     } else {
       const blob = await gridToPngBlob(grid, { transparent: this.pngTransparent })
       if (!blob) {
@@ -1046,8 +1044,13 @@ class GlyphEditor extends HTMLElement {
     }
 
     const bounds = inkBounds(this.grid)
-    if (bounds && bounds.maxX + 1 > this.session.advance)
-      parts.push('the drawing extends past the advance width')
+    if (bounds) {
+      const inkWidth = bounds.maxX - bounds.minX + 1
+      const { margin } = this.session
+      parts.push(
+        `advance width on export: ${inkWidth + margin * 2} px (${margin} + ${inkWidth} + ${margin})`
+      )
+    }
 
     if (this.size <= 16) parts.push('low resolution: fine details can disappear')
 
@@ -1138,9 +1141,8 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Draws the guide lines on top of the pixels: the font metrics as
-   * horizontal lines and the advance width as a vertical line. Lines are
-   * centered on their row or column boundary and kept inside the canvas.
+   * Draws the font metrics as horizontal guide lines on top of the pixels.
+   * Lines are centered on their row boundary and kept inside the canvas.
    * @param {Object} view - { ctx, size, cell, line, total, dpr }
    */
   drawGuides({ ctx, size, cell, line, total }) {
@@ -1151,10 +1153,6 @@ class GlyphEditor extends HTMLElement {
       const pos = Math.min(Math.max(row * cell - line, 0), total - thickness)
       ctx.fillRect(0, pos, total, thickness)
     }
-
-    const advanceX = Math.min(Math.max(this.session.advance * cell - line, 0), total - thickness)
-    ctx.fillStyle = ADVANCE_COLOR
-    ctx.fillRect(advanceX, 0, thickness, total)
   }
 
   /**

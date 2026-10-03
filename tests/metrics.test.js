@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { SIZES } from '../src/core/grid.js'
-import { UPM, unitsPerPixel, getMetrics, defaultAdvance } from '../src/metrics.js'
+import { UPM, unitsPerPixel, getMetrics, defaultMargin } from '../src/metrics.js'
 
 test('every guide lands on a whole row inside the grid', () => {
   for (const size of SIZES) {
@@ -46,10 +46,8 @@ test('getMetrics rejects unsupported sizes', () => {
   assert.throws(() => getMetrics(24), RangeError)
 })
 
-test('the default advance width is a whole number of pixels, 5/8 of the grid', () => {
-  for (const size of SIZES) {
-    assert.ok(Number.isInteger(defaultAdvance(size)))
-    assert.ok(defaultAdvance(size) < size)
-  }
-  assert.equal(defaultAdvance(16), 10)
+test('the default margin is a whole number of pixels, about 128 font units', () => {
+  for (const size of SIZES) assert.ok(Number.isInteger(defaultMargin(size)))
+  assert.equal(defaultMargin(32), 2)
+  assert.equal(defaultMargin(8), 1)
 })

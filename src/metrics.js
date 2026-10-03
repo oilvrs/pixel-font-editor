@@ -52,10 +52,10 @@ export function getMetrics(size) {
   return metrics
 }
 /**
- * Default advance width for a grid size, in pixels: 5/8 of the grid width.
+ * Default side margin for export, in pixels: about 1/16 of an em (128 font units).
  * @param {number} size - 8, 16, 32, 64 or 128
  * @returns {number}
  */
-export function defaultAdvance(size) {
-  return Math.round((size * 5) / 8)
+export function defaultMargin(size) {
+  return Math.max(1, size / 16)
 }
