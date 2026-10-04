@@ -3,7 +3,8 @@
  * Stateless: everything shown is set through attributes, and user actions
  * are sent as events.
  *
- * Attributes: tool, size, guides, brush, glyph, advance, png-bg
+ * Attributes: tool, size, guides, brush, glyph, glyph-name, panel, copy,
+ * margin, png-bg
  *
  * Events:
  * - tool-change { tool: 'pen' | 'eraser' | 'select' }
@@ -11,17 +12,19 @@
  * - brush-step { delta: 1 | -1 }
  * - guides-toggle
  * - clear
- * - glyph-change { char: string }
- * - advance-step { delta: 1 | -1 }
+ * - glyph-step { delta: 1 | -1 }
+ * - panel-toggle
+ * - copy-start
+ * - margin-step { delta: 1 | -1 }
  * - export { format: 'svg' | 'png' }
  * - png-bg-toggle
  *
- * @version 0.4.0
+ * @version 0.5.0
  */
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'size', 'guides', 'brush', 'glyph', 'margin', 'png-bg']
+    return ['tool', 'size', 'guides', 'brush', 'glyph', 'glyph-name', 'panel', 'copy', 'margin', 'png-bg']
   }
 
   constructor() {
@@ -91,21 +94,22 @@ class GlyphToolbar extends HTMLElement {
           text-align: center;
         }
 
-        input {
-          width: 2.5rem;
-          padding: 0.5rem;
-          border: 1px solid #000000;
-          border-radius: 0;
-          background: transparent;
+        .current {
+          display: inline-flex;
+          align-items: baseline;
+          gap: 0.5rem;
+          min-width: 8rem;
+          justify-content: center;
           color: #000000;
-          font-size: 0.85rem;
-          font-family: inherit;
-          text-align: center;
         }
 
-        input:focus {
-          outline: 2px solid blue;
-          outline-offset: 0;
+        .char {
+          font-size: 1.4rem;
+        }
+
+        .name {
+          font-size: 0.85rem;
+          color: #555555;
         }
 
         .hint {
@@ -161,8 +165,15 @@ class GlyphToolbar extends HTMLElement {
           <button data-size="128">128×128</button>
         </div>
         <div class="row">
+          <span class="label">glyph:</span>
+          <button id="glyphPrevBtn" title="previous glyph ( , )">‹</button>
+          <span class="current"><span class="char" id="glyphChar"></span><span class="name" id="glyphName"></span></span>
+          <button id="glyphNextBtn" title="next glyph ( . )">›</button>
+          <button id="panelBtn" title="all glyphs (G)">glyphs</button>
+          <button id="copyBtn" title="copy this drawing to another glyph">copy to…</button>
+        </div>
+        <div class="row">
           <span class="label">export:</span>
-          <label class="field">glyph <input id="glyphInput" type="text" maxlength="2" autocomplete="off" spellcheck="false" /></label>
           <span class="field">
             margin
             <button id="marginDownBtn" title="smaller side margin">−</button>
@@ -174,12 +185,12 @@ class GlyphToolbar extends HTMLElement {
           <button id="pngBgBtn" title="PNG background">png: transparent</button>
         </div>
       </div>
-      <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shift: keep proportions, snap rotation to 45° · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − + · export: type the glyph character, set the advance width, save</p>
+      <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shift: keep proportions, snap rotation to 45° · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − + · glyph: , . step, G all glyphs · T text preview</p>
     `
   }
 
   /**
-   * Sets up event listeners for all buttons and the glyph field.
+   * Sets up event listeners for all buttons.
    */
   setUpEventListeners() {
     const byId = (id) => this.shadowRoot.getElementById(id)
@@ -189,9 +200,7 @@ class GlyphToolbar extends HTMLElement {
     })
 
     this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () =>
-        this.emit('size-change', { size: parseInt(btn.dataset.size) })
-      )
+      btn.addEventListener('click', () => this.emit('size-change', { size: parseInt(btn.dataset.size) }))
     })
 
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
@@ -199,20 +208,16 @@ class GlyphToolbar extends HTMLElement {
     byId('clearBtn').addEventListener('click', () => this.emit('clear'))
     byId('guidesBtn').addEventListener('click', () => this.emit('guides-toggle'))
 
+    byId('glyphPrevBtn').addEventListener('click', () => this.emit('glyph-step', { delta: -1 }))
+    byId('glyphNextBtn').addEventListener('click', () => this.emit('glyph-step', { delta: 1 }))
+    byId('panelBtn').addEventListener('click', () => this.emit('panel-toggle'))
+    byId('copyBtn').addEventListener('click', () => this.emit('copy-start'))
+
     byId('marginDownBtn').addEventListener('click', () => this.emit('margin-step', { delta: -1 }))
     byId('marginUpBtn').addEventListener('click', () => this.emit('margin-step', { delta: 1 }))
     byId('exportSvgBtn').addEventListener('click', () => this.emit('export', { format: 'svg' }))
     byId('exportPngBtn').addEventListener('click', () => this.emit('export', { format: 'png' }))
     byId('pngBgBtn').addEventListener('click', () => this.emit('png-bg-toggle'))
-
-    const input = byId('glyphInput')
-    input.addEventListener('focus', () => input.select())
-    input.addEventListener('input', () =>
-      this.emit('glyph-change', { char: [...input.value][0] || '' })
-    )
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === 'Escape') input.blur()
-    })
   }
 
   /**
@@ -222,15 +227,6 @@ class GlyphToolbar extends HTMLElement {
    */
   emit(name, detail = {}) {
     this.dispatchEvent(new CustomEvent(name, { detail }))
-  }
-
-  /**
-   * Takes keyboard focus away from the glyph field, so shortcuts work again
-   * after the canvas is used.
-   */
-  blurInputs() {
-    const active = this.shadowRoot.activeElement
-    if (active) active.blur()
   }
 
   /**
@@ -253,13 +249,13 @@ class GlyphToolbar extends HTMLElement {
     if (!byId('guidesBtn')) return // Not rendered yet
 
     byId('guidesBtn').classList.toggle('active', this.getAttribute('guides') === 'on')
+    byId('panelBtn').classList.toggle('active', this.getAttribute('panel') === 'open')
+    byId('copyBtn').classList.toggle('active', this.getAttribute('copy') === 'on')
     byId('brushValue').textContent = `${this.getAttribute('brush') || 1} px`
     byId('marginValue').textContent = `${this.getAttribute('margin') || 0} px`
     byId('pngBgBtn').textContent = `png: ${this.getAttribute('png-bg') || 'transparent'}`
-
-    const glyph = this.getAttribute('glyph') || ''
-    const input = byId('glyphInput')
-    if (input.value !== glyph) input.value = glyph
+    byId('glyphChar').textContent = this.getAttribute('glyph') || ''
+    byId('glyphName').textContent = this.getAttribute('glyph-name') || ''
   }
 }
 

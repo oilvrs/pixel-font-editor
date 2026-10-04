@@ -1,2 +1,4 @@
 import './components/glyph-toolbar.js'
+import './components/glyph-panel.js'
+import './components/glyph-preview.js'
 import './components/glyph-editor.js'
