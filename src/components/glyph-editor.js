@@ -206,6 +206,22 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
+   * The bar with tools and brush size.
+   * @returns {HTMLElement}
+   */
+  get toolbar() {
+    return this.shadowRoot.querySelector('glyph-toolbar')
+  }
+
+  /**
+   * The settings panel on the right.
+   * @returns {HTMLElement}
+   */
+  get settings() {
+    return this.shadowRoot.querySelector('glyph-settings')
+  }
+
+  /**
    * The glyph set of a grid size: its side margin, font name and glyphs.
    * Loaded from localStorage the first time a size is used.
    * @param {number} size
@@ -344,20 +360,21 @@ class GlyphEditor extends HTMLElement {
         :host {
           display: block;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
-          padding: 2rem;
-          max-width: 1560px;
-          margin: 0 auto;
         }
 
         .layout {
-          display: flex;
-          align-items: flex-start;
-          gap: 2rem;
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto; /* Side panels have fixed widths and take no space when hidden */
+          align-items: start;
         }
 
         .main {
-          flex: 1;
-          min-width: 0; /* Lets the canvas and the preview scroll instead of stretching the page */
+          box-sizing: border-box;
+          width: 100%;
+          max-width: 1000px;
+          margin: 0 auto;
+          padding: 1.5rem 2rem;
+          min-width: 0;
         }
 
         .stage {
@@ -367,6 +384,7 @@ class GlyphEditor extends HTMLElement {
 
         .canvas {
           display: block;
+          margin: 0 auto;
           outline: 1px solid #000000;
           background: #ffffff;
           cursor: crosshair;
@@ -376,6 +394,7 @@ class GlyphEditor extends HTMLElement {
         .legend {
           display: flex;
           flex-wrap: wrap;
+          justify-content: center;
           gap: 0.5rem 1.25rem;
           font-size: 0.85rem;
           color: #000000;
@@ -398,6 +417,7 @@ class GlyphEditor extends HTMLElement {
         .notice {
           font-size: 0.85rem;
           color: #000000;
+          text-align: center;
           min-height: 1.4em;
           margin: 0.75rem 0 0 0;
         }
@@ -412,10 +432,7 @@ class GlyphEditor extends HTMLElement {
         <div class="main">
           <glyph-toolbar
             tool="${this.tool}"
-            size="${this.size}"
             brush="${this.brushSize}"
-            margin="${this.set.margin}"
-            png-bg="${this.pngTransparent ? 'transparent' : 'white'}"
             guides="${this.showGuides ? 'on' : 'off'}"
           ></glyph-toolbar>
           <div class="stage">
@@ -430,6 +447,11 @@ class GlyphEditor extends HTMLElement {
           <p class="notice" id="notice"></p>
           <glyph-preview></glyph-preview>
         </div>
+        <glyph-settings
+          size="${this.size}"
+          margin="${this.set.margin}"
+          png-bg="${this.pngTransparent ? 'transparent' : 'white'}"
+        ></glyph-settings>
       </div>
     `
   }
@@ -440,7 +462,7 @@ class GlyphEditor extends HTMLElement {
    */
   setUpEventListeners() {
     const canvas = this.shadowRoot.getElementById('canvas')
-    const toolbar = this.shadowRoot.querySelector('glyph-toolbar')
+    const { toolbar, settings } = this
 
     canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e))
     canvas.addEventListener('pointermove', (e) => this.onPointerMove(e))
@@ -450,20 +472,21 @@ class GlyphEditor extends HTMLElement {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault()) // Right click is the eraser
 
     toolbar.addEventListener('tool-change', (e) => this.setTool(e.detail.tool))
-    toolbar.addEventListener('size-change', (e) => this.setSize(e.detail.size))
     toolbar.addEventListener('brush-step', (e) => this.changeBrush(e.detail.delta))
     toolbar.addEventListener('clear', () => this.clear())
     toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
-    toolbar.addEventListener('glyph-step', (e) => this.stepGlyph(e.detail.delta))
-    toolbar.addEventListener('panel-toggle', () => this.togglePanel())
-    toolbar.addEventListener('copy-start', () => this.startCopy())
-    toolbar.addEventListener('margin-step', (e) => this.changeMargin(e.detail.delta))
-    toolbar.addEventListener('png-bg-toggle', () => this.togglePngBackground())
-    toolbar.addEventListener('export', (e) => this.exportGlyph(e.detail.format))
-    toolbar.addEventListener('name-change', (e) => this.setFontName(e.detail.name))
-    toolbar.addEventListener('export-all', (e) => this.exportAll(e.detail.format))
-    toolbar.addEventListener('backup', () => this.backup())
-    toolbar.addEventListener('restore', () => this.pickBackupFile())
+
+    settings.addEventListener('size-change', (e) => this.setSize(e.detail.size))
+    settings.addEventListener('glyph-step', (e) => this.stepGlyph(e.detail.delta))
+    settings.addEventListener('panel-toggle', () => this.togglePanel())
+    settings.addEventListener('copy-start', () => this.startCopy())
+    settings.addEventListener('margin-step', (e) => this.changeMargin(e.detail.delta))
+    settings.addEventListener('png-bg-toggle', () => this.togglePngBackground())
+    settings.addEventListener('export', (e) => this.exportGlyph(e.detail.format))
+    settings.addEventListener('name-change', (e) => this.setFontName(e.detail.name))
+    settings.addEventListener('export-all', (e) => this.exportAll(e.detail.format))
+    settings.addEventListener('backup', () => this.backup())
+    settings.addEventListener('restore', () => this.pickBackupFile())
 
     this.panel.addEventListener('glyph-pick', (e) => this.onGlyphPick(e.detail.char))
     this.panel.addEventListener('panel-close', () => this.togglePanel(false))
@@ -769,7 +792,7 @@ class GlyphEditor extends HTMLElement {
 
     e.preventDefault()
     this.preview.blurText() // Shortcuts work again after typing in the text preview
-    this.shadowRoot.querySelector('glyph-toolbar').blurInputs()
+    this.settings.blurInputs()
     e.currentTarget.setPointerCapture(e.pointerId) // Keeps the drag going outside the canvas
 
     const point = this.pointFromEvent(e)
@@ -1130,10 +1153,10 @@ class GlyphEditor extends HTMLElement {
     this.hoverCell = null
     this.hoverPoint = null
 
-    const toolbar = this.shadowRoot.querySelector('glyph-toolbar')
-    toolbar.setAttribute('size', size)
-    toolbar.setAttribute('margin', this.set.margin)
-    toolbar.setAttribute('font-name', this.set.name)
+    const settings = this.settings
+    settings.setAttribute('size', size)
+    settings.setAttribute('margin', this.set.margin)
+    settings.setAttribute('font-name', this.set.name)
 
     this.panel.rebuild()
     this.preview.refresh()
@@ -1190,7 +1213,7 @@ class GlyphEditor extends HTMLElement {
     set.margin = clamp(set.margin + delta, 0, Math.floor(this.size / 4))
     saveMargin(this.size, set.margin)
 
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('margin', set.margin)
+    this.settings.setAttribute('margin', set.margin)
     this.requestPreview()
     this.draw()
   }
@@ -1200,22 +1223,21 @@ class GlyphEditor extends HTMLElement {
    */
   togglePngBackground() {
     this.pngTransparent = !this.pngTransparent
-    this.shadowRoot
-      .querySelector('glyph-toolbar')
-      .setAttribute('png-bg', this.pngTransparent ? 'transparent' : 'white')
+    this.settings.setAttribute('png-bg', this.pngTransparent ? 'transparent' : 'white')
   }
 
   /**
-   * Shows the current glyph and the state of the panel and copy mode in the toolbar.
+   * Shows the current glyph, font name and the state of the glyph list and
+   * copy mode in the settings panel.
    */
   syncToolbar() {
-    const toolbar = this.shadowRoot.querySelector('glyph-toolbar')
+    const settings = this.settings
 
-    toolbar.setAttribute('glyph', this.currentChar)
-    toolbar.setAttribute('glyph-name', glyphName(this.currentChar))
-    toolbar.setAttribute('panel', this.panelOpen ? 'open' : 'closed')
-    toolbar.setAttribute('copy', this.copyMode ? 'on' : 'off')
-    toolbar.setAttribute('font-name', this.set.name)
+    settings.setAttribute('glyph', this.currentChar)
+    settings.setAttribute('glyph-name', glyphName(this.currentChar))
+    settings.setAttribute('panel', this.panelOpen ? 'open' : 'closed')
+    settings.setAttribute('copy', this.copyMode ? 'on' : 'off')
+    settings.setAttribute('font-name', this.set.name)
   }
 
   /**
@@ -1340,7 +1362,7 @@ class GlyphEditor extends HTMLElement {
   setFontName(name) {
     this.set.name = name
     saveName(this.size, name)
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('font-name', name)
+    this.settings.setAttribute('font-name', name)
   }
 
   /**
@@ -1474,7 +1496,7 @@ class GlyphEditor extends HTMLElement {
     this.preview.setText(backup.text)
 
     this.syncToolbar()
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('margin', this.set.margin)
+    this.settings.setAttribute('margin', this.set.margin)
     this.panel.rebuild()
     this.flash(`restored ${count} glyphs`)
     this.updateNotice()

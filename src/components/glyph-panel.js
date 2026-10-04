@@ -42,21 +42,25 @@ class GlyphPanel extends HTMLElement {
           :host {
           display: block;
           box-sizing: border-box;
-          flex: none;
-          width: 300px;
           position: sticky;
-          top: 1rem;
-          max-height: calc(100vh - 2rem);
+          top: 0;
+          width: 300px;
+          height: 100vh;
+          height: 100dvh;
           overflow-y: auto;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
-          border: 1px solid #000000;
+          padding: 1.5rem 1rem;
+          border-right: 1px solid #000000;
           background: #ffffff;
-          padding: 1rem;
           color: #000000;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
         }
 
         :host([hidden]) {
           display: none;
+        }
+
+        .title {
+          color:red;
         }
 
         .head {
@@ -154,7 +158,7 @@ class GlyphPanel extends HTMLElement {
       </style>
 
             <div class="head">
-        <span class="title">glyphs</span>
+        <span class="title">wood__house glyphs</span>
         <button class="close" id="closeBtn">close</button>
       </div>
       <p class="hint" id="hint"></p>

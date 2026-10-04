@@ -1,46 +1,22 @@
 /**
- * Toolbar for the glyph editor.
+ * Bar above the drawing area: tools and brush size.
  * Stateless: everything shown is set through attributes, and user actions
  * are sent as events.
  *
- * Attributes: tool, size, guides, brush, glyph, glyph-name, panel, copy,
- * margin, png-bg
+ * Attributes: tool, guides, brush
  *
  * Events:
  * - tool-change { tool: 'pen' | 'eraser' | 'select' }
- * - size-change { size: number }
  * - brush-step { delta: 1 | -1 }
  * - guides-toggle
- * - name-change { name: string }
- * - export-all { format: 'ufo' | 'svg' }
- * - backup
- * - restore
  * - clear
- * - glyph-step { delta: 1 | -1 }
- * - panel-toggle
- * - copy-start
- * - margin-step { delta: 1 | -1 }
- * - export { format: 'svg' | 'png' }
- * - png-bg-toggle
  *
- * @version 0.5.0
+ * @version 0.6.0
  */
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return [
-      'tool',
-      'size',
-      'guides',
-      'brush',
-      'glyph',
-      'glyph-name',
-      'panel',
-      'copy',
-      'margin',
-      'png-bg',
-      'font-name',
-    ]
+    return ['tool', 'guides', 'brush']
   }
 
   constructor() {
@@ -75,31 +51,24 @@ class GlyphToolbar extends HTMLElement {
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
         }
 
-        .panel {
-          border-bottom: 1px solid #000000;
-          margin-bottom: 0.75rem;
+        .bar {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
+          gap: 0.75rem 2rem;
+          padding: 0.9rem 0;
+          margin-bottom: 1.5rem;
         }
 
-        .row {
+        .group {
           display: flex;
           align-items: center;
-          flex-wrap: wrap;
-          gap: 0.75rem;
-          padding: 1rem 0;
-          border-top: 1px solid #000000;
+          gap: 0.6rem;
         }
 
         .label {
           font-size: 0.9rem;
-          color: #000000;
-          min-width: 3rem;
-        }
-
-        .field {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-size: 0.85rem;
           color: #000000;
         }
 
@@ -110,46 +79,6 @@ class GlyphToolbar extends HTMLElement {
           text-align: center;
         }
 
-        .current {
-          display: inline-flex;
-          align-items: baseline;
-          gap: 0.5rem;
-          min-width: 8rem;
-          justify-content: center;
-          color: #000000;
-        }
-
-        .char {
-          font-size: 1.4rem;
-        }
-
-        .name {
-          font-size: 0.85rem;
-          color: #555555;
-        }
-
-          input {
-          width: 12rem;
-          padding: 0.5rem;
-          border: 1px solid #000000;
-          border-radius: 0;
-          background: transparent;
-          color: #000000;
-          font-size: 0.85rem;
-          font-family: inherit;
-        }
-
-        input:focus {
-          outline: 2px solid blue;
-          outline-offset: 0;
-        }
-
-        .hint {
-          font-size: 0.85rem;
-          color: #000000;
-          margin: 0 0 1.5rem 0;
-        }
-
         button {
           background: transparent;
           color: #000000;
@@ -158,6 +87,7 @@ class GlyphToolbar extends HTMLElement {
           padding: 0.5rem 1rem;
           cursor: pointer;
           font-size: 0.85rem;
+          font-family: inherit;
           transition: background 0.2s, color 0.2s;
         }
 
@@ -167,14 +97,14 @@ class GlyphToolbar extends HTMLElement {
         }
 
         button.active {
-          background: blue;
+          background: #00ea70;
           color: #ffffff;
-          border-color: blue;
+          border-color: #00ea70;
         }
       </style>
 
-      <div class="panel">
-        <div class="row">
+      <div class="bar">
+        <div class="group">
           <span class="label">tool:</span>
           <button data-tool="pen" title="pen (B)">pen</button>
           <button data-tool="eraser" title="eraser (E)">eraser</button>
@@ -182,50 +112,13 @@ class GlyphToolbar extends HTMLElement {
           <button id="clearBtn">clear</button>
           <button id="guidesBtn">guides</button>
         </div>
-        <div class="row">
+        <div class="group">
           <span class="label">brush:</span>
           <button id="brushDownBtn" title="smaller ( [ or - )">−</button>
           <span class="value" id="brushValue">1 px</span>
           <button id="brushUpBtn" title="larger ( ] or + )">+</button>
         </div>
-        <div class="row">
-          <span class="label">grid:</span>
-          <button data-size="8">8×8</button>
-          <button data-size="16">16×16</button>
-          <button data-size="32">32×32</button>
-          <button data-size="64">64×64</button>
-          <button data-size="128">128×128</button>
-        </div>
-        <div class="row">
-          <span class="label">glyph:</span>
-          <button id="glyphPrevBtn" title="previous glyph ( , )">‹</button>
-          <span class="current"><span class="char" id="glyphChar"></span><span class="name" id="glyphName"></span></span>
-          <button id="glyphNextBtn" title="next glyph ( . )">›</button>
-          <button id="panelBtn" title="all glyphs (G)">glyphs</button>
-          <button id="copyBtn" title="copy this drawing to another glyph">copy to…</button>
-        </div>
-        <div class="row">
-          <span class="label">export:</span>
-          <span class="field">
-            margin
-            <button id="marginDownBtn" title="smaller side margin">−</button>
-            <span class="value" id="marginValue">2 px</span>
-            <button id="marginUpBtn" title="larger side margin">+</button>
-          </span>
-          <button id="exportSvgBtn">save svg</button>
-          <button id="exportPngBtn">save png</button>
-          <button id="pngBgBtn" title="PNG background">png: transparent</button>
-        </div>
-                <div class="row">
-          <span class="label">project:</span>
-          <label class="field">font <input id="nameInput" type="text" maxlength="40" autocomplete="off" spellcheck="false" /></label>
-          <button id="exportUfoBtn" title="the whole font as a .ufo that Glyphs opens">save ufo</button>
-          <button id="exportAllSvgBtn" title="every drawn glyph as SVG, in one zip">all svg</button>
-          <button id="backupBtn" title="save all drawings as a backup file">backup</button>
-          <button id="restoreBtn" title="replace everything with a backup file">restore</button>
-        </div>
       </div>
-      <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shift: keep proportions, snap rotation to 45° · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − + · glyph: , . step, G all glyphs · T text preview</p>
     `
   }
 
@@ -239,41 +132,10 @@ class GlyphToolbar extends HTMLElement {
       btn.addEventListener('click', () => this.emit('tool-change', { tool: btn.dataset.tool }))
     })
 
-    this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () =>
-        this.emit('size-change', { size: parseInt(btn.dataset.size) })
-      )
-    })
-
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
     byId('brushUpBtn').addEventListener('click', () => this.emit('brush-step', { delta: 1 }))
     byId('clearBtn').addEventListener('click', () => this.emit('clear'))
     byId('guidesBtn').addEventListener('click', () => this.emit('guides-toggle'))
-
-    byId('glyphPrevBtn').addEventListener('click', () => this.emit('glyph-step', { delta: -1 }))
-    byId('glyphNextBtn').addEventListener('click', () => this.emit('glyph-step', { delta: 1 }))
-    byId('panelBtn').addEventListener('click', () => this.emit('panel-toggle'))
-    byId('copyBtn').addEventListener('click', () => this.emit('copy-start'))
-
-    byId('marginDownBtn').addEventListener('click', () => this.emit('margin-step', { delta: -1 }))
-    byId('marginUpBtn').addEventListener('click', () => this.emit('margin-step', { delta: 1 }))
-    byId('exportSvgBtn').addEventListener('click', () => this.emit('export', { format: 'svg' }))
-    byId('exportPngBtn').addEventListener('click', () => this.emit('export', { format: 'png' }))
-    byId('pngBgBtn').addEventListener('click', () => this.emit('png-bg-toggle'))
-
-    byId('exportUfoBtn').addEventListener('click', () => this.emit('export-all', { format: 'ufo' }))
-    byId('exportAllSvgBtn').addEventListener('click', () =>
-      this.emit('export-all', { format: 'svg' })
-    )
-    byId('backupBtn').addEventListener('click', () => this.emit('backup'))
-    byId('restoreBtn').addEventListener('click', () => this.emit('restore'))
-
-    const input = byId('nameInput')
-    input.addEventListener('focus', () => input.select())
-    input.addEventListener('input', () => this.emit('name-change', { name: input.value }))
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === 'Escape') input.blur()
-    })
   }
 
   /**
@@ -286,45 +148,21 @@ class GlyphToolbar extends HTMLElement {
   }
 
   /**
-   * Takes keyboard focus away from the font name field, so shortcuts work
-   * again after the canvas is used.
-   */
-  blurInputs() {
-    const active = this.shadowRoot.activeElement
-    if (active) active.blur()
-  }
-
-  /**
    * Marks the buttons that match the current attributes and shows the
-   * values.
+   * brush size.
    */
   updateActive() {
     const tool = this.getAttribute('tool')
-    const size = this.getAttribute('size')
 
     this.shadowRoot.querySelectorAll('[data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === tool)
-    })
-
-    this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.size === size)
     })
 
     const byId = (id) => this.shadowRoot.getElementById(id)
     if (!byId('guidesBtn')) return // Not rendered yet
 
     byId('guidesBtn').classList.toggle('active', this.getAttribute('guides') === 'on')
-    byId('panelBtn').classList.toggle('active', this.getAttribute('panel') === 'open')
-    byId('copyBtn').classList.toggle('active', this.getAttribute('copy') === 'on')
     byId('brushValue').textContent = `${this.getAttribute('brush') || 1} px`
-    byId('marginValue').textContent = `${this.getAttribute('margin') || 0} px`
-    byId('pngBgBtn').textContent = `png: ${this.getAttribute('png-bg') || 'transparent'}`
-    byId('glyphChar').textContent = this.getAttribute('glyph') || ''
-    byId('glyphName').textContent = this.getAttribute('glyph-name') || ''
-
-    const fontName = this.getAttribute('font-name') || ''
-    const nameInput = byId('nameInput')
-    if (nameInput.value !== fontName) nameInput.value = fontName
   }
 }
 
