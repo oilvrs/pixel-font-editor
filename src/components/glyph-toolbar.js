@@ -11,6 +11,10 @@
  * - size-change { size: number }
  * - brush-step { delta: 1 | -1 }
  * - guides-toggle
+ * - name-change { name: string }
+ * - export-all { format: 'ufo' | 'svg' }
+ * - backup
+ * - restore
  * - clear
  * - glyph-step { delta: 1 | -1 }
  * - panel-toggle
@@ -24,7 +28,19 @@
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'size', 'guides', 'brush', 'glyph', 'glyph-name', 'panel', 'copy', 'margin', 'png-bg']
+    return [
+      'tool',
+      'size',
+      'guides',
+      'brush',
+      'glyph',
+      'glyph-name',
+      'panel',
+      'copy',
+      'margin',
+      'png-bg',
+      'font-name',
+    ]
   }
 
   constructor() {
@@ -112,6 +128,22 @@ class GlyphToolbar extends HTMLElement {
           color: #555555;
         }
 
+          input {
+          width: 12rem;
+          padding: 0.5rem;
+          border: 1px solid #000000;
+          border-radius: 0;
+          background: transparent;
+          color: #000000;
+          font-size: 0.85rem;
+          font-family: inherit;
+        }
+
+        input:focus {
+          outline: 2px solid blue;
+          outline-offset: 0;
+        }
+
         .hint {
           font-size: 0.85rem;
           color: #000000;
@@ -184,6 +216,14 @@ class GlyphToolbar extends HTMLElement {
           <button id="exportPngBtn">save png</button>
           <button id="pngBgBtn" title="PNG background">png: transparent</button>
         </div>
+                <div class="row">
+          <span class="label">project:</span>
+          <label class="field">font <input id="nameInput" type="text" maxlength="40" autocomplete="off" spellcheck="false" /></label>
+          <button id="exportUfoBtn" title="the whole font as a .ufo that Glyphs opens">save ufo</button>
+          <button id="exportAllSvgBtn" title="every drawn glyph as SVG, in one zip">all svg</button>
+          <button id="backupBtn" title="save all drawings as a backup file">backup</button>
+          <button id="restoreBtn" title="replace everything with a backup file">restore</button>
+        </div>
       </div>
       <p class="hint">draw: drag · erase: right click or shift · select: drag a rectangle, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shift: keep proportions, snap rotation to 45° · copy ⌘C, paste ⌘V · undo: ⌘Z · brush: [ ] or − + · glyph: , . step, G all glyphs · T text preview</p>
     `
@@ -200,7 +240,9 @@ class GlyphToolbar extends HTMLElement {
     })
 
     this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () => this.emit('size-change', { size: parseInt(btn.dataset.size) }))
+      btn.addEventListener('click', () =>
+        this.emit('size-change', { size: parseInt(btn.dataset.size) })
+      )
     })
 
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
@@ -218,6 +260,20 @@ class GlyphToolbar extends HTMLElement {
     byId('exportSvgBtn').addEventListener('click', () => this.emit('export', { format: 'svg' }))
     byId('exportPngBtn').addEventListener('click', () => this.emit('export', { format: 'png' }))
     byId('pngBgBtn').addEventListener('click', () => this.emit('png-bg-toggle'))
+
+    byId('exportUfoBtn').addEventListener('click', () => this.emit('export-all', { format: 'ufo' }))
+    byId('exportAllSvgBtn').addEventListener('click', () =>
+      this.emit('export-all', { format: 'svg' })
+    )
+    byId('backupBtn').addEventListener('click', () => this.emit('backup'))
+    byId('restoreBtn').addEventListener('click', () => this.emit('restore'))
+
+    const input = byId('nameInput')
+    input.addEventListener('focus', () => input.select())
+    input.addEventListener('input', () => this.emit('name-change', { name: input.value }))
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'Escape') input.blur()
+    })
   }
 
   /**
@@ -227,6 +283,15 @@ class GlyphToolbar extends HTMLElement {
    */
   emit(name, detail = {}) {
     this.dispatchEvent(new CustomEvent(name, { detail }))
+  }
+
+  /**
+   * Takes keyboard focus away from the font name field, so shortcuts work
+   * again after the canvas is used.
+   */
+  blurInputs() {
+    const active = this.shadowRoot.activeElement
+    if (active) active.blur()
   }
 
   /**
@@ -256,6 +321,10 @@ class GlyphToolbar extends HTMLElement {
     byId('pngBgBtn').textContent = `png: ${this.getAttribute('png-bg') || 'transparent'}`
     byId('glyphChar').textContent = this.getAttribute('glyph') || ''
     byId('glyphName').textContent = this.getAttribute('glyph-name') || ''
+
+    const fontName = this.getAttribute('font-name') || ''
+    const nameInput = byId('nameInput')
+    if (nameInput.value !== fontName) nameInput.value = fontName
   }
 }
 

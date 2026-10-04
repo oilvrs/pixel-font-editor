@@ -13,7 +13,7 @@
  *   Enter or a click outside places the pixels, esc cancels.
  * - cmd/ctrl+c copies the selection, cmd/ctrl+v pastes it as floating pixels.
  * - cmd/ctrl+z undoes, cmd/ctrl+shift+z redoes.
- * - , and . step through the glyphs, g opens the glyph panel, t moves to the
+ * - , and . step through the glyphs, g shows or hides the glyph sidebar., t moves to the
  *   text preview.
  *
  * @version 0.6.0
@@ -29,7 +29,7 @@ import {
   clearRegion,
   pixelsEqual,
   serializeGrid,
-  deserializeGrid
+  deserializeGrid,
 } from '../core/grid.js'
 import { createHistory, pushState, undoState, redoState } from '../core/history.js'
 import { getMetrics, defaultMargin } from '../metrics.js'
@@ -42,11 +42,24 @@ import {
   fromLocal,
   transformCorners,
   resizeTransform,
-  rotatedAngle
+  rotatedAngle,
 } from '../core/transform.js'
 import { gridToPngBlob } from '../utils/export-png.js'
 import { downloadText, downloadBlob } from '../utils/download.js'
-import { loadGlyph, saveGlyph, loadMargin, saveMargin } from '../utils/storage.js'
+import {
+  loadGlyph,
+  saveGlyph,
+  loadMargin,
+  saveMargin,
+  loadName,
+  saveName,
+  loadPanelOpen,
+  savePanelOpen,
+  clearAll as clearAllSaved,
+} from '../utils/storage.js'
+import { buildUfo, safeFileName } from '../core/export-ufo.js'
+import { createZip } from '../core/zip.js'
+import { createBackup, parseBackup } from '../core/backup.js'
 
 // Cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
 const CELL_PX = { 8: 64, 16: 32, 32: 20, 64: 12, 128: 7 }
@@ -60,7 +73,7 @@ const GUIDE_COLORS = {
   capHeight: '#0000ff',
   xHeight: '#06a94d',
   baseline: '#ff0000',
-  descender: '#7a7a7a'
+  descender: '#7a7a7a',
 }
 
 const MAX_BRUSH = 32
@@ -75,7 +88,7 @@ const HANDLES = [
   [0, -1],
   [1, 0],
   [0, 1],
-  [-1, 0]
+  [-1, 0],
 ]
 
 const HANDLE_DRAW_CSS = 8 // Drawn handle size, CSS px
@@ -142,7 +155,7 @@ class GlyphEditor extends HTMLElement {
     this.size = 32 // Active grid size
     this.sets = new Map() // size -> { margin, glyphs: Map(char -> { grid, history }) }, loaded on first use
     this.currentChar = 'A' // The glyph being drawn
-    this.panelOpen = false // Glyph panel shown
+    this.panelOpen = loadPanelOpen() // The glyph sidebar is open by default and remembers its state
     this.copyMode = false // The next glyph picked in the panel receives a copy of the current drawing
     this.tool = 'pen' // 'pen', 'eraser' or 'select'
     this.showGuides = true // Guide lines on or off
@@ -193,13 +206,22 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * The glyph set of the active grid size: its side margin and glyphs.
+   * The glyph set of a grid size: its side margin, font name and glyphs.
    * Loaded from localStorage the first time a size is used.
-   * @returns {Object} { margin, glyphs }
+   * @param {number} size
+   * @returns {Object} { margin, name, glyphs }
+   */
+  setFor(size) {
+    if (!this.sets.has(size)) this.sets.set(size, this.loadSet(size))
+    return this.sets.get(size)
+  }
+
+  /**
+   * The glyph set of the active grid size.
+   * @returns {Object} { margin, name, glyphs }
    */
   get set() {
-    if (!this.sets.has(this.size)) this.sets.set(this.size, this.loadSet(this.size))
-    return this.sets.get(this.size)
+    return this.setFor(this.size)
   }
 
   /**
@@ -226,8 +248,10 @@ class GlyphEditor extends HTMLElement {
   loadSet(size) {
     const savedMargin = loadMargin(size)
     const set = {
-      margin: savedMargin === null ? defaultMargin(size) : clamp(savedMargin, 0, Math.floor(size / 4)),
-      glyphs: new Map()
+      margin:
+        savedMargin === null ? defaultMargin(size) : clamp(savedMargin, 0, Math.floor(size / 4)),
+      name: loadName(size) || 'Pixel Font',
+      glyphs: new Map(),
     }
 
     for (const char of ALL_GLYPHS) {
@@ -282,12 +306,12 @@ class GlyphEditor extends HTMLElement {
       current: this.currentChar,
       copyMode: this.copyMode,
       size: this.size,
-      getGrid: (char) => this.peekGrid(char)
+      getGrid: (char) => this.peekGrid(char),
     })
     this.preview.source = () => ({
       size: this.size,
       margin: this.set.margin,
-      getGrid: (char) => this.peekGrid(char)
+      getGrid: (char) => this.peekGrid(char),
     })
 
     this.syncToolbar()
@@ -321,8 +345,19 @@ class GlyphEditor extends HTMLElement {
           display: block;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
           padding: 2rem;
-          max-width: 1200px;
+          max-width: 1560px;
           margin: 0 auto;
+        }
+
+        .layout {
+          display: flex;
+          align-items: flex-start;
+          gap: 2rem;
+        }
+
+        .main {
+          flex: 1;
+          min-width: 0; /* Lets the canvas and the preview scroll instead of stretching the page */
         }
 
         .stage {
@@ -372,26 +407,30 @@ class GlyphEditor extends HTMLElement {
         }
       </style>
 
-      <glyph-toolbar
-        tool="${this.tool}"
-        size="${this.size}"
-        brush="${this.brushSize}"
-        margin="${this.set.margin}"
-        png-bg="${this.pngTransparent ? 'transparent' : 'white'}"
-        guides="${this.showGuides ? 'on' : 'off'}"
-      ></glyph-toolbar>
-      <glyph-panel hidden></glyph-panel>
-      <div class="stage">
-        <canvas id="canvas" class="canvas"></canvas>
+      <div class="layout">
+        <glyph-panel ${this.panelOpen ? '' : 'hidden'}></glyph-panel>
+        <div class="main">
+          <glyph-toolbar
+            tool="${this.tool}"
+            size="${this.size}"
+            brush="${this.brushSize}"
+            margin="${this.set.margin}"
+            png-bg="${this.pngTransparent ? 'transparent' : 'white'}"
+            guides="${this.showGuides ? 'on' : 'off'}"
+          ></glyph-toolbar>
+          <div class="stage">
+            <canvas id="canvas" class="canvas"></canvas>
+          </div>
+          <p class="legend" id="legend">
+            <span class="key" style="--c: #ff0000">baseline</span>
+            <span class="key" style="--c: #0000ff">cap-height</span>
+            <span class="key" style="--c: #06a94d">x-height</span>
+            <span class="key" style="--c: #7a7a7a">ascender / descender</span>
+          </p>
+          <p class="notice" id="notice"></p>
+          <glyph-preview></glyph-preview>
+        </div>
       </div>
-      <p class="legend" id="legend">
-        <span class="key" style="--c: #ff0000">baseline</span>
-        <span class="key" style="--c: #0000ff">cap-height</span>
-        <span class="key" style="--c: #06a94d">x-height</span>
-        <span class="key" style="--c: #7a7a7a">ascender / descender</span>
-      </p>
-      <p class="notice" id="notice"></p>
-      <glyph-preview></glyph-preview>
     `
   }
 
@@ -421,6 +460,10 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('margin-step', (e) => this.changeMargin(e.detail.delta))
     toolbar.addEventListener('png-bg-toggle', () => this.togglePngBackground())
     toolbar.addEventListener('export', (e) => this.exportGlyph(e.detail.format))
+    toolbar.addEventListener('name-change', (e) => this.setFontName(e.detail.name))
+    toolbar.addEventListener('export-all', (e) => this.exportAll(e.detail.format))
+    toolbar.addEventListener('backup', () => this.backup())
+    toolbar.addEventListener('restore', () => this.pickBackupFile())
 
     this.panel.addEventListener('glyph-pick', (e) => this.onGlyphPick(e.detail.char))
     this.panel.addEventListener('panel-close', () => this.togglePanel(false))
@@ -477,14 +520,10 @@ class GlyphEditor extends HTMLElement {
       if (this.floating) this.cancelFloating()
       else if (this.selection) this.clearSelection()
       else if (this.copyMode) this.cancelCopy()
-      else if (this.panelOpen) this.togglePanel(false)
     } else if (arrows[key] && (this.floating || (this.tool === 'select' && this.selection))) {
-      e.preventDefault()
-      if (!this.floating) this.liftSelection()
-
       this.updateFloating({
         cx: this.floating.cx + arrows[key][0],
-        cy: this.floating.cy + arrows[key][1]
+        cy: this.floating.cy + arrows[key][1],
       })
       this.draw()
     } else if (key === '[' || key === '-') {
@@ -581,7 +620,7 @@ class GlyphEditor extends HTMLElement {
     const rect = e.currentTarget.getBoundingClientRect()
     return {
       x: ((e.clientX - rect.left) / rect.width) * this.size,
-      y: ((e.clientY - rect.top) / rect.height) * this.size
+      y: ((e.clientY - rect.top) / rect.height) * this.size,
     }
   }
 
@@ -602,7 +641,8 @@ class GlyphEditor extends HTMLElement {
   setHover(cell) {
     const inside = cell.x >= 0 && cell.y >= 0 && cell.x < this.size && cell.y < this.size
     const next = inside ? cell : null
-    const same = next && this.hoverCell && next.x === this.hoverCell.x && next.y === this.hoverCell.y
+    const same =
+      next && this.hoverCell && next.x === this.hoverCell.x && next.y === this.hoverCell.y
 
     if (same || (!next && !this.hoverCell)) return false
 
@@ -683,7 +723,12 @@ class GlyphEditor extends HTMLElement {
 
     if (Math.abs(local.x) <= halfW && Math.abs(local.y) <= halfH) return { type: 'move' }
 
-    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    for (const [sx, sy] of [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ]) {
       const dx = (local.x - sx * halfW) * css
       const dy = (local.y - sy * halfH) * css
       if (Math.hypot(dx, dy) <= ROTATE_ZONE_CSS) return { type: 'rotate' }
@@ -702,7 +747,14 @@ class GlyphEditor extends HTMLElement {
     const { cx, cy, w, h, angle } = this.floating
 
     this.dragMode = hit.type
-    this.dragStart = { type: hit.type, point, cell, transform: { cx, cy, w, h, angle }, hx: hit.hx, hy: hit.hy }
+    this.dragStart = {
+      type: hit.type,
+      point,
+      cell,
+      transform: { cx, cy, w, h, angle },
+      hx: hit.hx,
+      hy: hit.hy,
+    }
   }
 
   /**
@@ -717,6 +769,7 @@ class GlyphEditor extends HTMLElement {
 
     e.preventDefault()
     this.preview.blurText() // Shortcuts work again after typing in the text preview
+    this.shadowRoot.querySelector('glyph-toolbar').blurInputs()
     e.currentTarget.setPointerCapture(e.pointerId) // Keeps the drag going outside the canvas
 
     const point = this.pointFromEvent(e)
@@ -777,7 +830,10 @@ class GlyphEditor extends HTMLElement {
     this.hoverPoint = point
     let redraw = this.setHover(cell)
 
-    if (this.dragMode === 'liftpending' && (cell.x !== this.liftStart.x || cell.y !== this.liftStart.y)) {
+    if (
+      this.dragMode === 'liftpending' &&
+      (cell.x !== this.liftStart.x || cell.y !== this.liftStart.y)
+    ) {
       this.liftSelection()
       this.beginTransform({ type: 'move' }, this.liftPoint, this.liftStart)
       redraw = true
@@ -785,7 +841,15 @@ class GlyphEditor extends HTMLElement {
 
     if (this.dragMode === 'stroke') {
       if (cell.x !== this.lastCell.x || cell.y !== this.lastCell.y) {
-        const changed = drawLine(this.grid, this.lastCell.x, this.lastCell.y, cell.x, cell.y, !this.erasing, this.brushSize)
+        const changed = drawLine(
+          this.grid,
+          this.lastCell.x,
+          this.lastCell.y,
+          cell.x,
+          cell.y,
+          !this.erasing,
+          this.brushSize
+        )
         this.lastCell = cell
 
         if (changed) {
@@ -804,7 +868,7 @@ class GlyphEditor extends HTMLElement {
       const { cell: startCell, transform } = this.dragStart
       this.updateFloating({
         cx: transform.cx + (cell.x - startCell.x),
-        cy: transform.cy + (cell.y - startCell.y)
+        cy: transform.cy + (cell.y - startCell.y),
       })
       redraw = true
     } else if (this.dragMode === 'resize') {
@@ -896,7 +960,7 @@ class GlyphEditor extends HTMLElement {
       angle: 0,
       before: null, // A paste has no lift, so the undo state is taken when it is placed
       origin: null,
-      cache: null
+      cache: null,
     }
 
     this.updateNotice()
@@ -925,7 +989,7 @@ class GlyphEditor extends HTMLElement {
       angle: 0,
       before: grid.pixels.slice(), // Restored on cancel, pushed to history on place
       origin: this.selection,
-      cache: null
+      cache: null,
     }
 
     clearRegion(grid, x, y, width, height)
@@ -1069,6 +1133,7 @@ class GlyphEditor extends HTMLElement {
     const toolbar = this.shadowRoot.querySelector('glyph-toolbar')
     toolbar.setAttribute('size', size)
     toolbar.setAttribute('margin', this.set.margin)
+    toolbar.setAttribute('font-name', this.set.name)
 
     this.panel.rebuild()
     this.preview.refresh()
@@ -1107,7 +1172,9 @@ class GlyphEditor extends HTMLElement {
    */
   toggleGuides() {
     this.showGuides = !this.showGuides
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('guides', this.showGuides ? 'on' : 'off')
+    this.shadowRoot
+      .querySelector('glyph-toolbar')
+      .setAttribute('guides', this.showGuides ? 'on' : 'off')
     this.shadowRoot.getElementById('legend').classList.toggle('hidden', !this.showGuides)
     this.draw()
   }
@@ -1133,7 +1200,9 @@ class GlyphEditor extends HTMLElement {
    */
   togglePngBackground() {
     this.pngTransparent = !this.pngTransparent
-    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('png-bg', this.pngTransparent ? 'transparent' : 'white')
+    this.shadowRoot
+      .querySelector('glyph-toolbar')
+      .setAttribute('png-bg', this.pngTransparent ? 'transparent' : 'white')
   }
 
   /**
@@ -1146,6 +1215,7 @@ class GlyphEditor extends HTMLElement {
     toolbar.setAttribute('glyph-name', glyphName(this.currentChar))
     toolbar.setAttribute('panel', this.panelOpen ? 'open' : 'closed')
     toolbar.setAttribute('copy', this.copyMode ? 'on' : 'off')
+    toolbar.setAttribute('font-name', this.set.name)
   }
 
   /**
@@ -1177,12 +1247,13 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Shows or hides the glyph panel.
+   * Shows or hides the glyph sidebar. The state is remembered.
    * @param {boolean} open - the new state, the opposite of the current one by default
    */
   togglePanel(open = !this.panelOpen) {
     this.panelOpen = open
     this.panel.hidden = !open
+    savePanelOpen(open)
 
     if (!open && this.copyMode) this.copyMode = false
 
@@ -1245,7 +1316,10 @@ class GlyphEditor extends HTMLElement {
     const source = this.grid
     const target = this.recordFor(char)
 
-    if (!isEmpty(target.grid) && !window.confirm(`Replace the drawing of "${char}" with a copy of "${this.currentChar}"?`)) {
+    if (
+      !isEmpty(target.grid) &&
+      !window.confirm(`Replace the drawing of "${char}" with a copy of "${this.currentChar}"?`)
+    ) {
       return
     }
 
@@ -1256,6 +1330,155 @@ class GlyphEditor extends HTMLElement {
     this.copyMode = false
     this.setGlyph(char)
     this.flash(`copied to ${char}`)
+  }
+
+  /**
+   * Sets the font name of the active grid size. It becomes the family name
+   * in the UFO and the name of the exported files. It is saved.
+   * @param {string} name
+   */
+  setFontName(name) {
+    this.set.name = name
+    saveName(this.size, name)
+    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('font-name', name)
+  }
+
+  /**
+   * Saves every drawn glyph of the active grid size in one ZIP: a UFO font
+   * that Glyphs opens, or one SVG per glyph.
+   * @param {string} format - 'ufo' or 'svg'
+   */
+  exportAll(format) {
+    this.commitFloating()
+
+    const { margin, name, glyphs } = this.set
+    const drawn = ALL_GLYPHS.filter(
+      (char) => glyphs.has(char) && !isEmpty(glyphs.get(char).grid)
+    ).map((char) => ({
+      char,
+      grid: glyphs.get(char).grid,
+    }))
+
+    if (drawn.length === 0) {
+      this.flash('nothing to export: no glyph has a drawing yet')
+      return
+    }
+
+    let files
+    let fileName
+
+    if (format === 'ufo') {
+      const ufo = buildUfo(drawn, { familyName: name, size: this.size, margin })
+      files = ufo.files
+      fileName = `${ufo.folderName}.zip`
+    } else {
+      files = drawn.map(({ char, grid }) => ({
+        name: exportFileName(glyphName(char), 'svg'),
+        data: buildSvg(grid, { margin }),
+      }))
+      fileName = `${safeFileName(name)}-svg.zip`
+    }
+
+    downloadBlob(new Blob([createZip(files)], { type: 'application/zip' }), fileName)
+    this.flash(
+      `saved ${fileName} with ${drawn.length} glyphs${format === 'ufo' ? ' · unzip it, then open the .ufo in Glyphs' : ''}`
+    )
+  }
+
+  /**
+   * Saves a backup of every grid size, margin, font name and the preview
+   * text as a JSON file.
+   */
+  backup() {
+    this.commitFloating()
+    for (const size of SIZES) this.setFor(size) // Loads every size, so none is left out
+
+    const backup = createBackup(this.sets, this.preview.getText())
+    const count = Object.values(backup.sets).reduce(
+      (sum, set) => sum + Object.keys(set.glyphs).length,
+      0
+    )
+    const date = new Date().toISOString().slice(0, 10)
+    const fileName = `${safeFileName(this.set.name)}-backup-${date}.json`
+
+    downloadText(JSON.stringify(backup), fileName, 'application/json')
+    this.flash(`saved ${fileName} with ${count} glyphs`)
+  }
+
+  /**
+   * Opens a file picker for a backup file and restores it.
+   */
+  pickBackupFile() {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,application/json'
+
+    input.addEventListener('change', async () => {
+      const file = input.files[0]
+      if (file) this.restoreBackup(await file.text())
+    })
+
+    input.click()
+  }
+
+  /**
+   * Replaces everything in the editor with the content of a backup file,
+   * after a confirmation. Undo history is not part of a backup, so it starts
+   * empty.
+   * @param {string} json - the file content
+   */
+  restoreBackup(json) {
+    let backup
+
+    try {
+      backup = parseBackup(json)
+    } catch (error) {
+      this.flash(`could not restore: ${error.message}`)
+      return
+    }
+
+    const count = backup.sets.reduce((sum, set) => sum + set.glyphs.length, 0)
+    if (
+      !window.confirm(
+        `Restore ${count} glyphs from this backup? Everything currently in the editor is replaced.`
+      )
+    )
+      return
+
+    this.cancelFloating()
+    clearTimeout(this.saveTimer)
+    this.dirty.clear()
+    clearAllSaved()
+    this.sets.clear()
+    this.selection = null
+
+    for (const saved of backup.sets) {
+      const set = {
+        margin: saved.margin === null ? defaultMargin(saved.size) : saved.margin,
+        name: saved.name || 'Pixel Font',
+        glyphs: new Map(),
+      }
+
+      saveMargin(saved.size, set.margin)
+      saveName(saved.size, set.name)
+
+      for (const { char, grid } of saved.glyphs) {
+        set.glyphs.set(char, { grid, history: createHistory() })
+        saveGlyph(saved.size, char, serializeGrid(grid))
+      }
+
+      this.sets.set(saved.size, set)
+    }
+
+    savePanelOpen(this.panelOpen)
+    this.preview.setText(backup.text)
+
+    this.syncToolbar()
+    this.shadowRoot.querySelector('glyph-toolbar').setAttribute('margin', this.set.margin)
+    this.panel.rebuild()
+    this.flash(`restored ${count} glyphs`)
+    this.updateNotice()
+    this.draw()
   }
 
   /**
@@ -1317,14 +1540,18 @@ class GlyphEditor extends HTMLElement {
 
     if (this.floating) {
       const { w, h, angle } = this.floating
-      parts.push(`floating ${Math.abs(w)}×${Math.abs(h)} px, ${degrees(angle)}° · enter to place, esc to cancel`)
+      parts.push(
+        `floating ${Math.abs(w)}×${Math.abs(h)} px, ${degrees(angle)}° · enter to place, esc to cancel`
+      )
     }
 
     const bounds = inkBounds(this.grid)
     if (bounds) {
       const inkWidth = bounds.maxX - bounds.minX + 1
       const { margin } = this.set
-      parts.push(`advance width on export: ${inkWidth + margin * 2} px (${margin} + ${inkWidth} + ${margin})`)
+      parts.push(
+        `advance width on export: ${inkWidth + margin * 2} px (${margin} + ${inkWidth} + ${margin})`
+      )
     }
 
     if (this.size <= 16) parts.push('low resolution: fine details can disappear')
@@ -1564,7 +1791,8 @@ class GlyphEditor extends HTMLElement {
     const right = Math.min(size, this.hoverCell.x - offset + this.brushSize)
     const bottom = Math.min(size, this.hoverCell.y - offset + this.brushSize)
 
-    ctx.fillStyle = this.erasing || this.tool === 'eraser' ? 'rgba(255, 0, 0, 0.35)' : 'rgba(128, 128, 128, 0.5)'
+    ctx.fillStyle =
+      this.erasing || this.tool === 'eraser' ? 'rgba(255, 0, 0, 0.35)' : 'rgba(128, 128, 128, 0.5)'
     ctx.fillRect(left * cell, top * cell, (right - left) * cell, (bottom - top) * cell)
   }
 }

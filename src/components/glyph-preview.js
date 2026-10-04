@@ -161,6 +161,23 @@ class GlyphPreview extends HTMLElement {
   }
 
   /**
+   * @returns {string} the text in the text field
+   */
+  getText() {
+    return this.textarea.value
+  }
+
+  /**
+   * Replaces the text, saves it and redraws.
+   * @param {string} text - the default text is used if this is empty
+   */
+  setText(text) {
+    this.textarea.value = text || DEFAULT_TEXT
+    saveText(this.textarea.value)
+    this.refresh()
+  }
+
+  /**
    * Moves the cursor to the end of the text field.
    */
   focusText() {

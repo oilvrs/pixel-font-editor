@@ -15,7 +15,7 @@
 import { GLYPH_GROUPS } from '../core/glyph-set.js'
 import { glyphName } from '../core/glyph-names.js'
 
-const CELL_CSS = 44 // Box size in CSS px
+const CELL_CSS = 40 // Box size in CSS px, WAS 44
 
 class GlyphPanel extends HTMLElement {
   constructor() {
@@ -39,13 +39,19 @@ class GlyphPanel extends HTMLElement {
   render() {
     this.shadowRoot.innerHTML = `
       <style>
-        :host {
+          :host {
           display: block;
+          box-sizing: border-box;
+          flex: none;
+          width: 300px;
+          position: sticky;
+          top: 1rem;
+          max-height: calc(100vh - 2rem);
+          overflow-y: auto;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
           border: 1px solid #000000;
           background: #ffffff;
           padding: 1rem;
-          margin-bottom: 1.5rem;
           color: #000000;
         }
 
@@ -56,6 +62,7 @@ class GlyphPanel extends HTMLElement {
         .head {
           display: flex;
           align-items: center;
+          justify-content: space-between;
           gap: 1rem;
         }
 
@@ -64,7 +71,7 @@ class GlyphPanel extends HTMLElement {
         }
 
         .hint {
-          flex: 1;
+          margin: 0.75rem 0 0 0;
           font-size: 0.85rem;
         }
 
@@ -146,11 +153,11 @@ class GlyphPanel extends HTMLElement {
         }
       </style>
 
-      <div class="head">
+            <div class="head">
         <span class="title">glyphs</span>
-        <span class="hint" id="hint"></span>
         <button class="close" id="closeBtn">close</button>
       </div>
+      <p class="hint" id="hint"></p>
       <div id="groups"></div>
     `
 
@@ -220,6 +227,8 @@ class GlyphPanel extends HTMLElement {
    */
   highlight() {
     const { current, copyMode } = this.source()
+    const currentButton = this.cells.get(current)
+    if (currentButton && !this.hidden) currentButton.scrollIntoView({ block: 'nearest' })
 
     this.cells.forEach((button, char) => button.classList.toggle('current', char === current))
     this.shadowRoot.getElementById('groups').classList.toggle('copying', copyMode)
@@ -262,7 +271,9 @@ class GlyphPanel extends HTMLElement {
    */
   updateHeadings() {
     for (const { group, element } of this.headings) {
-      const filled = group.chars.filter((char) => this.cells.get(char).classList.contains('filled')).length
+      const filled = group.chars.filter((char) =>
+        this.cells.get(char).classList.contains('filled')
+      ).length
       element.textContent = `${group.label} · ${filled}/${group.chars.length}`
     }
   }

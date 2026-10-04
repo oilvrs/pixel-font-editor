@@ -101,3 +101,56 @@ export function loadText() {
 export function saveText(text) {
   return write('text', text)
 }
+
+/**
+ * @param {number} size
+ * @returns {string|null} the saved font name of a grid size
+ */
+export function loadName(size) {
+  return read(`${size}:name`)
+}
+
+/**
+ * @param {number} size
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function saveName(size, name) {
+  return write(`${size}:name`, name)
+}
+
+/**
+ * @returns {boolean} whether the glyph sidebar is open, open by default
+ */
+export function loadPanelOpen() {
+  const raw = read('panel-open')
+  return raw === null ? true : raw === '1'
+}
+
+/**
+ * @param {boolean} open
+ * @returns {boolean}
+ */
+export function savePanelOpen(open) {
+  return write('panel-open', open ? '1' : '0')
+}
+
+/**
+ * Removes everything this editor has saved.
+ * @returns {boolean} true if it worked
+ */
+export function clearAll() {
+  try {
+    const keys = []
+
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)
+      if (key && key.startsWith(PREFIX)) keys.push(key)
+    }
+
+    keys.forEach((key) => window.localStorage.removeItem(key))
+    return true
+  } catch (error) {
+    return false
+  }
+}
