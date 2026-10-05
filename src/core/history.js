@@ -1,12 +1,25 @@
 /**
- * Undo/redo history based on pixel snapshots.
- * Pure logic, no DOM dependencies. One entry is one whole stroke.
+ * Undo/redo history based on snapshots.
+ * Pure logic, no DOM dependencies. One entry is one whole change.
  *
- * A history is { past, future, limit }. Entries are copies of a grid's
- * pixels array.
+ * A snapshot is either a pixels array (Uint8Array) or an object
+ * { pixels, shapes }. Entries are copies, never references.
  *
- * @version 0.1.0
+ * @version 0.2.0
  */
+
+/**
+ * Copies a snapshot.
+ * @param {Uint8Array|Object} state
+ * @returns {Uint8Array|Object}
+ */
+function copyState(state) {
+  if (state && state.pixels) {
+    return { pixels: state.pixels.slice(), shapes: (state.shapes || []).map((shape) => ({ ...shape })) }
+  }
+
+  return state.slice()
+}
 
 /**
  * Creates an empty history.
@@ -20,10 +33,10 @@ export function createHistory(limit = 100) {
 /**
  * Records the state from before a change. Clears the redo stack.
  * @param {Object} history
- * @param {Uint8Array} pixels - the state before the change
+ * @param {Uint8Array|Object} state - the state before the change
  */
-export function pushState(history, pixels) {
-  history.past.push(pixels.slice())
+export function pushState(history, state) {
+  history.past.push(copyState(state))
   if (history.past.length > history.limit) history.past.shift()
   history.future = []
 }
@@ -31,23 +44,23 @@ export function pushState(history, pixels) {
 /**
  * Steps back one entry.
  * @param {Object} history
- * @param {Uint8Array} current - the current state, kept for redo
- * @returns {Uint8Array|null} the previous state, or null if there is none
+ * @param {Uint8Array|Object} current - the current state, kept for redo
+ * @returns {Uint8Array|Object|null} the previous state, or null if there is none
  */
 export function undoState(history, current) {
   if (history.past.length === 0) return null
-  history.future.push(current.slice())
+  history.future.push(copyState(current))
   return history.past.pop()
 }
 
 /**
  * Steps forward one entry.
  * @param {Object} history
- * @param {Uint8Array} current - the current state, kept for undo
- * @returns {Uint8Array|null} the next state, or null if there is none
+ * @param {Uint8Array|Object} current - the current state, kept for undo
+ * @returns {Uint8Array|Object|null} the next state, or null if there is none
  */
 export function redoState(history, current) {
   if (history.future.length === 0) return null
-  history.past.push(current.slice())
+  history.past.push(copyState(current))
   return history.future.pop()
 }

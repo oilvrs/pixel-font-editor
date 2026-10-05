@@ -41,3 +41,30 @@ test('pushState stores a copy, not a reference', () => {
   pixels[0] = 1
   assert.deepEqual(history.past[0], new Uint8Array([0, 0]))
 })
+
+test('snapshots with pixels and shapes are copied, not shared', () => {
+  const history = createHistory()
+  const snapshot = { pixels: new Uint8Array([1, 0]), shapes: [{ type: 'rect', cx: 1 }] }
+
+  pushState(history, snapshot)
+  snapshot.pixels[0] = 0
+  snapshot.shapes[0].cx = 99
+
+  assert.deepEqual(history.past[0].pixels, new Uint8Array([1, 0]))
+  assert.equal(history.past[0].shapes[0].cx, 1)
+})
+
+test('undo and redo work with snapshots', () => {
+  const history = createHistory()
+  const before = { pixels: new Uint8Array([0]), shapes: [] }
+  const after = { pixels: new Uint8Array([1]), shapes: [{ type: 'rect', cx: 1 }] }
+
+  pushState(history, before)
+  const undone = undoState(history, after)
+  assert.deepEqual(undone.pixels, before.pixels)
+  assert.deepEqual(undone.shapes, [])
+
+  const redone = redoState(history, before)
+  assert.deepEqual(redone.pixels, after.pixels)
+  assert.equal(redone.shapes[0].cx, 1)
+})

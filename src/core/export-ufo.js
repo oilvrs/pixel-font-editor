@@ -4,6 +4,7 @@
  *
  * A UFO is a folder of XML files. This module returns the files, and the
  * caller packs them in a ZIP, since a browser cannot write a folder.
+ * Shapes are written as curves (cubic Bézier), with smooth points for ellipses.
  *
  * Glyph rules are the same as the SVG export: where a letter is drawn
  * horizontally does not matter, the ink is moved so its left edge is
@@ -16,7 +17,8 @@
  */
 
 import { traceGrid } from './trace.js'
-import { inkBounds } from './export-svg.js'
+import { glyphBounds } from './glyph.js'
+import { shapeContour, reverseContour } from './shapes.js'
 import { glyphName, exportFileName } from './glyph-names.js'
 import { spaceWidth } from './layout.js'
 import { getMetrics, unitsPerPixel, UPM } from '../metrics.js'
@@ -32,7 +34,11 @@ const PLIST_HEAD =
  * @returns {string}
  */
 function xml(text) {
-  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 /**
@@ -70,7 +76,8 @@ function unicodeHex(char) {
 
 /**
  * Writes one .glif file.
- * @param {Object} glyph - { name, advance, char, contours } where contours are lists of { x, y } in font units
+ * @param {Object} glyph - { name, advance, char, contours } where contours are lists of
+ *   { x, y, type, smooth } in font units. type is 'line', 'curve' or null for a control point.
  * @returns {string}
  */
 function glif({ name, advance, char, contours = [] }) {
@@ -78,7 +85,7 @@ function glif({ name, advance, char, contours = [] }) {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<glyph name="${xml(name)}" format="2">`,
     `  <advance width="${advance}"/>`,
-    `  <unicode hex="${unicodeHex(char)}"/>`
+    `  <unicode hex="${unicodeHex(char)}"/>`,
   ]
 
   if (contours.length > 0) {
@@ -86,7 +93,13 @@ function glif({ name, advance, char, contours = [] }) {
 
     for (const points of contours) {
       lines.push('    <contour>')
-      for (const { x, y } of points) lines.push(`      <point x="${x}" y="${y}" type="line"/>`)
+
+      for (const { x, y, type, smooth } of points) {
+        const typeAttribute = type ? ` type="${type}"` : ''
+        const smoothAttribute = smooth ? ' smooth="yes"' : ''
+        lines.push(`      <point x="${x}" y="${y}"${typeAttribute}${smoothAttribute}/>`)
+      }
+
       lines.push('    </contour>')
     }
 
@@ -98,8 +111,37 @@ function glif({ name, advance, char, contours = [] }) {
 }
 
 /**
+ * Turns a shape into the points of a UFO contour: line points, and for a
+ * curve two control points followed by the curve point. The contour starts
+ * at an on-curve point.
+ * @param {Object} shape
+ * @param {Function} toX
+ * @param {Function} toY
+ * @returns {Object[]} [{ x, y, type, smooth }]
+ */
+function shapePoints(shape, toX, toY) {
+  const contour = reverseContour(shapeContour(shape))
+  const points = []
+
+  for (const segment of contour.segments) {
+    if (segment.c1) {
+      points.push(
+        { x: toX(segment.c1.x), y: toY(segment.c1.y), type: null },
+        { x: toX(segment.c2.x), y: toY(segment.c2.y), type: null },
+        { x: toX(segment.to.x), y: toY(segment.to.y), type: 'curve', smooth: contour.smooth }
+      )
+    } else {
+      points.push({ x: toX(segment.to.x), y: toY(segment.to.y), type: 'line' })
+    }
+  }
+
+  points.unshift(points.pop()) // The last point is the start of the contour, so it goes first
+  return points
+}
+
+/**
  * Builds the files of a UFO.
- * @param {Object[]} glyphs - [{ char, grid }], only glyphs that have a drawing
+ * @param {Object[]} glyphs - [{ char, grid, shapes }], only glyphs that have a drawing
  * @param {Object} options
  * @param {string} options.familyName
  * @param {number} options.size - grid size
@@ -113,30 +155,47 @@ export function buildUfo(glyphs, { familyName, size, margin }) {
   const units = (row) => (baseline - row) * unit // A row boundary as a height above the baseline
   const folderName = `${safeFileName(familyName)}.ufo`
 
-  const entries = glyphs.map(({ char, grid }) => {
-    const bounds = inkBounds(grid)
-    const shift = margin - bounds.minX
-    const advance = (bounds.maxX - bounds.minX + 1 + margin * 2) * unit
+  const entries = glyphs.map(({ char, grid, shapes = [] }) => {
+    const bounds = glyphBounds({ grid, shapes })
+    const shift = margin - bounds.left
+    const advance = Math.round((bounds.right - bounds.left + margin * 2) * unit)
+
+    const toX = (px) => Math.round((px + shift) * unit)
+    const toY = (py) => Math.round(units(py))
 
     const contours = traceGrid(grid).map((contour) =>
       contour.points
         .slice()
         .reverse()
-        .map((p) => ({ x: (p.x + shift) * unit, y: units(p.y) }))
+        .map((p) => ({ x: toX(p.x), y: toY(p.y), type: 'line' }))
     )
 
+    for (const shape of shapes) contours.push(shapePoints(shape, toX, toY))
+
     const name = glyphName(char)
-    return { name, file: exportFileName(name, 'glif'), text: glif({ name, advance, char, contours }) }
+    return {
+      name,
+      file: exportFileName(name, 'glif'),
+      text: glif({ name, advance, char, contours }),
+    }
   })
 
   entries.unshift({
     name: 'space',
     file: 'space.glif',
-    text: glif({ name: 'space', advance: spaceWidth(size) * unit, char: ' ' })
+    text: glif({ name: 'space', advance: spaceWidth(size) * unit, char: ' ' }),
   })
 
   const files = [
-    { name: 'metainfo.plist', data: plist(dict([['creator', str('pixel-glyph-editor')], ['formatVersion', int(3)]])) },
+    {
+      name: 'metainfo.plist',
+      data: plist(
+        dict([
+          ['creator', str('pixel-glyph-editor')],
+          ['formatVersion', int(3)],
+        ])
+      ),
+    },
     {
       name: 'fontinfo.plist',
       data: plist(
@@ -149,18 +208,26 @@ export function buildUfo(glyphs, { familyName, size, margin }) {
           ['unitsPerEm', int(UPM)],
           ['versionMajor', int(1)],
           ['versionMinor', int(0)],
-          ['xHeight', int(units(metrics.xHeight))]
+          ['xHeight', int(units(metrics.xHeight))],
         ])
-      )
+      ),
     },
     {
       name: 'layercontents.plist',
-      data: plist('<array>\n\t<array>\n\t\t<string>public.default</string>\n\t\t<string>glyphs</string>\n\t</array>\n</array>')
+      data: plist(
+        '<array>\n\t<array>\n\t\t<string>public.default</string>\n\t\t<string>glyphs</string>\n\t</array>\n</array>'
+      ),
     },
-    { name: 'lib.plist', data: plist(dict([['public.glyphOrder', array(entries.map((e) => str(e.name)))]])) },
+    {
+      name: 'lib.plist',
+      data: plist(dict([['public.glyphOrder', array(entries.map((e) => str(e.name)))]])),
+    },
     { name: 'glyphs/contents.plist', data: plist(dict(entries.map((e) => [e.name, str(e.file)]))) },
-    ...entries.map((e) => ({ name: `glyphs/${e.file}`, data: e.text }))
+    ...entries.map((e) => ({ name: `glyphs/${e.file}`, data: e.text })),
   ]
 
-  return { folderName, files: files.map((file) => ({ name: `${folderName}/${file.name}`, data: file.data })) }
+  return {
+    folderName,
+    files: files.map((file) => ({ name: `${folderName}/${file.name}`, data: file.data })),
+  }
 }

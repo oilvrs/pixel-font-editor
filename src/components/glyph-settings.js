@@ -226,10 +226,12 @@ class GlyphSettings extends HTMLElement {
         </div>
       </section>
 
-      <p class="hint">
+            <p class="hint">
         draw: drag · erase: right click or shift · select (M): drag a rectangle, then drag inside to move, drag a
-        handle to resize, drag outside a corner to rotate · shift: keep proportions, snap rotation to 45° ·
-        copy ⌘C, paste ⌘V · undo ⌘Z · brush: [ ] or − + · glyph: , . step · G glyph list · T text preview
+        handle to resize, drag outside a corner to rotate · shapes (S): click or drag to place, same handles ·
+        shift: keep proportions or a square, snap rotation to 45° · R: rotate a shape 90° · delete: remove
+        selected shape or pixels · copy ⌘C, paste ⌘V · undo ⌘Z · brush: [ ] or − + · glyph: , . step · G glyph
+        list · T text preview
       </p>
     `
   }
@@ -241,7 +243,9 @@ class GlyphSettings extends HTMLElement {
     const byId = (id) => this.shadowRoot.getElementById(id)
 
     this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () => this.emit('size-change', { size: parseInt(btn.dataset.size) }))
+      btn.addEventListener('click', () =>
+        this.emit('size-change', { size: parseInt(btn.dataset.size) })
+      )
     })
 
     byId('glyphPrevBtn').addEventListener('click', () => this.emit('glyph-step', { delta: -1 }))
@@ -256,7 +260,9 @@ class GlyphSettings extends HTMLElement {
     byId('pngBgBtn').addEventListener('click', () => this.emit('png-bg-toggle'))
 
     byId('exportUfoBtn').addEventListener('click', () => this.emit('export-all', { format: 'ufo' }))
-    byId('exportAllSvgBtn').addEventListener('click', () => this.emit('export-all', { format: 'svg' }))
+    byId('exportAllSvgBtn').addEventListener('click', () =>
+      this.emit('export-all', { format: 'svg' })
+    )
     byId('backupBtn').addEventListener('click', () => this.emit('backup'))
     byId('restoreBtn').addEventListener('click', () => this.emit('restore'))
 

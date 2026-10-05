@@ -9,6 +9,8 @@
  * @version 0.1.0
  */
 
+import { paintShapes } from './paint-shapes.js'
+
 /**
  * Renders a grid to a PNG.
  * @param {Object} grid - { size, pixels }
@@ -17,7 +19,7 @@
  * @param {number} options.targetPx - wanted image width in px
  * @returns {Promise<Blob|null>}
  */
-export function gridToPngBlob(grid, { transparent = true, targetPx = 512 } = {}) {
+export function gridToPngBlob(grid, { transparent = true, targetPx = 512, shapes = [] } = {}) {
   const scale = Math.max(1, Math.floor(targetPx / grid.size))
   const canvas = document.createElement('canvas')
   canvas.width = grid.size * scale
@@ -36,6 +38,9 @@ export function gridToPngBlob(grid, { transparent = true, targetPx = 512 } = {})
       if (grid.pixels[y * grid.size + x]) ctx.fillRect(x * scale, y * scale, scale, scale)
     }
   }
+
+    ctx.fillStyle = '#000000'
+  paintShapes(ctx, shapes, { scale })
 
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
 }

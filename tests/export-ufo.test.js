@@ -108,3 +108,31 @@ test('safeFileName', () => {
   assert.equal(safeFileName(''), 'Pixel Font')
   assert.equal(safeFileName('..hidden'), 'hidden')
 })
+
+test('a shape becomes curve points, with smooth junctions for an ellipse', () => {
+  const ellipse = { type: 'ellipse', cx: 3, cy: 3, w: 2, h: 2, angle: 0 }
+  const ufo = buildUfo([{ char: 'o', grid: createGrid(16), shapes: [ellipse] }], {
+    familyName: 'Test',
+    size: 16,
+    margin: 1
+  })
+  const glif = files(ufo).get('Test.ufo/glyphs/o.glif')
+
+  assert.equal((glif.match(/<point /g) || []).length, 12) // Four curves with two control points each
+  assert.equal((glif.match(/type="curve" smooth="yes"/g) || []).length, 4)
+  assert.ok(glif.includes('<advance width="512"/>')) // 2 px of shape plus 2 px of margin
+})
+
+test('a triangle shape is a closed contour of lines', () => {
+  const triangle = { type: 'triangle', cx: 2, cy: 2, w: 2, h: 2, angle: 0 }
+  const ufo = buildUfo([{ char: 'v', grid: createGrid(16), shapes: [triangle] }], {
+    familyName: 'Test',
+    size: 16,
+    margin: 0
+  })
+  const contours = contoursOf(files(ufo).get('Test.ufo/glyphs/v.glif'))
+
+  assert.equal(contours.length, 1)
+  assert.equal(contours[0].length, 3)
+  assert.ok(area(contours[0]) > 0) // Counter-clockwise in y-up coordinates
+})

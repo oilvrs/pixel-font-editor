@@ -1,22 +1,31 @@
 /**
- * Bar above the drawing area: tools and brush size.
+ * Bar above the drawing area: tools, the shapes menu and brush size.
  * Stateless: everything shown is set through attributes, and user actions
  * are sent as events.
  *
- * Attributes: tool, guides, brush
+ * Attributes: tool, shape, guides, brush
  *
  * Events:
- * - tool-change { tool: 'pen' | 'eraser' | 'select' }
+ * - tool-change { tool: 'pen' | 'eraser' | 'select' | 'shapes' }
+ * - shape-change { shape: 'rect' | 'ellipse' | 'quarter' | 'concave' | 'triangle' }
  * - brush-step { delta: 1 | -1 }
  * - guides-toggle
  * - clear
  *
- * @version 0.6.0
+ * @version 0.7.0
  */
+
+const SHAPES = [
+  ['rect', 'rectangle (shift: square)', '<rect x="2" y="2" width="12" height="12"/>'],
+  ['ellipse', 'ellipse (shift: circle)', '<ellipse cx="8" cy="8" rx="6.5" ry="4.5"/>'],
+  ['quarter', 'quarter circle', '<path d="M2 2 H14 A12 12 0 0 1 2 14 Z"/>'],
+  ['concave', 'concave corner', '<path d="M2 2 H14 A12 12 0 0 0 2 14 Z"/>'],
+  ['triangle', 'triangle', '<path d="M2 2 H14 L2 14 Z"/>']
+]
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'guides', 'brush']
+    return ['tool', 'shape', 'guides', 'brush']
   }
 
   constructor() {
@@ -44,11 +53,22 @@ class GlyphToolbar extends HTMLElement {
    * Renders the HTML template and styles into the shadow DOM.
    */
   render() {
+    const shapeButtons = SHAPES.map(
+      ([type, title, drawing]) =>
+        `<button class="shape" data-shape="${type}" title="${title}"><svg viewBox="0 0 16 16" width="18" height="18">${drawing}</svg></button>`
+    ).join('')
+
     this.shadowRoot.innerHTML = `
       <style>
         :host {
           display: block;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+        }
+
+        .frame {
+          border-top: 1px solid #000000;
+          border-bottom: 1px solid #000000;
+          margin-bottom: 1.5rem;
         }
 
         .bar {
@@ -58,7 +78,19 @@ class GlyphToolbar extends HTMLElement {
           justify-content: center;
           gap: 0.75rem 2rem;
           padding: 0.9rem 0;
-          margin-bottom: 1.5rem;
+        }
+
+        .shapes {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          padding: 0.75rem 0;
+          border-top: 1px solid #000000;
+        }
+
+        .shapes.hidden {
+          display: none;
         }
 
         .group {
@@ -97,27 +129,40 @@ class GlyphToolbar extends HTMLElement {
         }
 
         button.active {
-          background: #00ea70;
+          background: #05cf67;
           color: #ffffff;
-          border-color: #00ea70;
+          border-color: #05cf67;
+        }
+
+        button.shape {
+          padding: 0.45rem 0.7rem;
+          line-height: 0;
+        }
+
+        button.shape svg {
+          fill: currentColor;
         }
       </style>
 
-      <div class="bar">
-        <div class="group">
-          <span class="label">tool:</span>
-          <button data-tool="pen" title="pen (B)">pen</button>
-          <button data-tool="eraser" title="eraser (E)">eraser</button>
-          <button data-tool="select" title="select (M)">select</button>
-          <button id="clearBtn">clear</button>
-          <button id="guidesBtn">guides</button>
+      <div class="frame">
+        <div class="bar">
+          <div class="group">
+            <span class="label">tool:</span>
+            <button data-tool="pen" title="pen (B)">pen</button>
+            <button data-tool="eraser" title="eraser (E)">eraser</button>
+            <button data-tool="select" title="select (M)">select</button>
+            <button data-tool="shapes" title="shapes (S)">shapes</button>
+            <button id="clearBtn">clear</button>
+            <button id="guidesBtn">guides</button>
+          </div>
+          <div class="group">
+            <span class="label">brush:</span>
+            <button id="brushDownBtn" title="smaller ( [ or - )">−</button>
+            <span class="value" id="brushValue">1 px</span>
+            <button id="brushUpBtn" title="larger ( ] or + )">+</button>
+          </div>
         </div>
-        <div class="group">
-          <span class="label">brush:</span>
-          <button id="brushDownBtn" title="smaller ( [ or - )">−</button>
-          <span class="value" id="brushValue">1 px</span>
-          <button id="brushUpBtn" title="larger ( ] or + )">+</button>
-        </div>
+        <div class="shapes hidden" id="shapeRow">${shapeButtons}</div>
       </div>
     `
   }
@@ -130,6 +175,10 @@ class GlyphToolbar extends HTMLElement {
 
     this.shadowRoot.querySelectorAll('[data-tool]').forEach((btn) => {
       btn.addEventListener('click', () => this.emit('tool-change', { tool: btn.dataset.tool }))
+    })
+
+    this.shadowRoot.querySelectorAll('[data-shape]').forEach((btn) => {
+      btn.addEventListener('click', () => this.emit('shape-change', { shape: btn.dataset.shape }))
     })
 
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
@@ -148,19 +197,25 @@ class GlyphToolbar extends HTMLElement {
   }
 
   /**
-   * Marks the buttons that match the current attributes and shows the
-   * brush size.
+   * Marks the buttons that match the current attributes, shows the shapes
+   * menu while the shapes tool is active and shows the brush size.
    */
   updateActive() {
+    const byId = (id) => this.shadowRoot.getElementById(id)
+    if (!byId('guidesBtn')) return // Not rendered yet
+
     const tool = this.getAttribute('tool')
+    const shape = this.getAttribute('shape')
 
     this.shadowRoot.querySelectorAll('[data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === tool)
     })
 
-    const byId = (id) => this.shadowRoot.getElementById(id)
-    if (!byId('guidesBtn')) return // Not rendered yet
+    this.shadowRoot.querySelectorAll('[data-shape]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.shape === shape)
+    })
 
+    byId('shapeRow').classList.toggle('hidden', tool !== 'shapes')
     byId('guidesBtn').classList.toggle('active', this.getAttribute('guides') === 'on')
     byId('brushValue').textContent = `${this.getAttribute('brush') || 1} px`
   }

@@ -3,7 +3,7 @@
  * picture, empty boxes show the character.
  *
  * The panel gets its data from a `source` function, set by the editor:
- *   () => ({ current, copyMode, size, getGrid })
+ *   () => ({ current, copyMode, size, getGlyph })
  * where getGrid(char) returns a grid with pixels, or null.
  *
  * Methods: rebuild() (everything), refreshGlyph(char), highlight()
@@ -14,14 +14,16 @@
 
 import { GLYPH_GROUPS } from '../core/glyph-set.js'
 import { glyphName } from '../core/glyph-names.js'
+import { paintShapes } from '../utils/paint-shapes.js'
 
 const CELL_CSS = 40 // Box size in CSS px, WAS 44
+const THUMB_PX = 80 // Size of the picture in a box, in image px (the box itself is CELL_CSS)
 
 class GlyphPanel extends HTMLElement {
   constructor() {
     super()
     this.attachShadow({ mode: 'open' })
-    this.source = () => ({ current: '', copyMode: false, size: 32, getGrid: () => null })
+    this.source = () => ({ current: '', copyMode: false, size: 32, getGlyph: () => null })
     this.cells = new Map() // char -> button
     this.headings = [] // [{ group, element }]
   }
@@ -242,32 +244,35 @@ class GlyphPanel extends HTMLElement {
   }
 
   /**
-   * Draws one box: the whole grid as a small picture, or nothing if the
-   * glyph has no drawing.
+   * Draws one box: the whole glyph (pixels and shapes) as a small picture,
+   * or nothing if the glyph has no drawing.
    * @param {string} char
    */
   paintCell(char) {
-    const { size, getGrid } = this.source()
+    const { size, getGlyph } = this.source()
     const button = this.cells.get(char)
     const canvas = button.querySelector('canvas')
-    const grid = getGrid(char)
+    const glyph = getGlyph(char)
 
-    button.classList.toggle('filled', Boolean(grid))
-    if (!grid) return
+    button.classList.toggle('filled', Boolean(glyph))
+    if (!glyph) return
 
-    canvas.width = size
-    canvas.height = size
-    canvas.style.imageRendering = size <= CELL_CSS ? 'pixelated' : 'auto'
+    const scale = Math.max(1, Math.floor(THUMB_PX / size))
+    canvas.width = size * scale
+    canvas.height = size * scale
 
     const ctx = canvas.getContext('2d')
-    ctx.clearRect(0, 0, size, size)
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.fillStyle = '#000000'
 
+    const { pixels } = glyph.grid
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        if (grid.pixels[y * size + x]) ctx.fillRect(x, y, 1, 1)
+        if (pixels[y * size + x]) ctx.fillRect(x * scale, y * scale, scale, scale)
       }
     }
+
+    paintShapes(ctx, glyph.shapes, { scale })
   }
 
   /**

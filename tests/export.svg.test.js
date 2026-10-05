@@ -60,7 +60,7 @@ test('a single pixel on 16x16 is written in font units, origin at the baseline',
   const svg = buildSvg(grid, { margin: 1 })
 
   assert.equal(viewBoxOf(svg), '0 -1792 384 2048') // Width: margin 1 + ink 1 + margin 1 = 3 px = 384 units
-  assert.ok(svg.includes('fill-rule="evenodd"'))
+  assert.ok(svg.includes('fill-rule="nonzero"'))
   assert.deepEqual(numbersOf(svg), [-1408, -1280, 128, 256]) // Moved left so the ink starts 1 px from x = 0
 })
 
@@ -122,4 +122,28 @@ test('inkBounds finds the filled rectangle, or null when empty', () => {
 
   const grid = gridFrom(['', '..#', '.#', '', '...#'])
   assert.deepEqual(inkBounds(grid), { minX: 1, minY: 1, maxX: 3, maxY: 4 })
+})
+
+test('shapes are written as curves and count in the advance width', () => {
+  const grid = gridFrom(['..#']) // Column 2
+  const circle = { type: 'ellipse', cx: 7, cy: 2, w: 2, h: 2, angle: 0 } // Cells 6 and 7
+  const svg = buildSvg(grid, { margin: 1, shapes: [circle] })
+
+  assert.match(pathOf(svg), /C/)
+  assert.equal(subpaths(svg).length, 2) // The pixel and the shape
+  assert.equal(viewBoxOf(svg), '0 -1792 1024 2048') // Ink from column 2 to 8 is 6 px, plus 2 margin = 8 px of 128 units
+})
+
+test('a glyph with only shapes can be exported', () => {
+  const triangle = { type: 'triangle', cx: 2, cy: 2, w: 2, h: 2, angle: 0 }
+  const svg = buildSvg(createGrid(16), { margin: 0, shapes: [triangle] })
+
+  assert.equal(viewBoxOf(svg), '0 -1792 256 2048')
+  assert.equal(subpaths(svg).length, 1)
+})
+
+test('where a shape sits horizontally does not matter', () => {
+  const at = (cx) => ({ type: 'quarter', cx, cy: 3, w: 2, h: 2, angle: 0 })
+
+  assert.equal(buildSvg(createGrid(16), { margin: 1, shapes: [at(3)] }), buildSvg(createGrid(16), { margin: 1, shapes: [at(9)] }))
 })

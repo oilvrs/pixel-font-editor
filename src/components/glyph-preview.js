@@ -3,7 +3,7 @@
  * with the same spacing the SVG export gives.
  *
  * The preview gets its data from a `source` function, set by the editor:
- *   () => ({ size, margin, getGrid })
+ *   () => ({ size, margin, getGlyph })
  *
  * Methods: refresh(), focusText(), blurText()
  *
@@ -12,6 +12,7 @@
 
 import { layoutText } from '../core/layout.js'
 import { loadText, saveText } from '../utils/storage.js'
+import { paintShapes } from '../utils/paint-shapes.js'
 
 const DEFAULT_TEXT = 'Hamburgefonstiv'
 const TARGET_HEIGHT = 96 // Wanted height of one line, in CSS px, when choosing the default zoom
@@ -21,7 +22,7 @@ class GlyphPreview extends HTMLElement {
   constructor() {
     super()
     this.attachShadow({ mode: 'open' })
-    this.source = () => ({ size: 32, margin: 2, getGrid: () => null })
+    this.source = () => ({ size: 32, margin: 2, getGlyph: () => null })
     this.scale = 1 // Image pixels per grid cell, in CSS px
     this.lastSize = null
   }
@@ -201,7 +202,7 @@ class GlyphPreview extends HTMLElement {
   refresh() {
     if (!this.textarea) return
 
-    const { size, margin, getGrid } = this.source()
+    const { size, margin, getGlyph } = this.source()
 
     if (size !== this.lastSize) {
       this.scale = Math.max(1, Math.floor(TARGET_HEIGHT / size))
@@ -210,13 +211,13 @@ class GlyphPreview extends HTMLElement {
 
     this.shadowRoot.getElementById('zoomValue').textContent = `${this.scale}×`
 
-    const layout = layoutText(this.textarea.value, getGrid, { size, margin })
+    const layout = layoutText(this.textarea.value, getGlyph, { size, margin })
     const dpr = window.devicePixelRatio || 1
     const cell = Math.max(1, Math.round(this.scale * dpr))
 
     const canvas = this.shadowRoot.getElementById('canvas')
-    const width = Math.min(Math.max(1, layout.width * cell), MAX_CANVAS)
-    const height = Math.min(Math.max(1, layout.height * cell), MAX_CANVAS)
+    const width = Math.min(Math.max(1, Math.ceil(layout.width * cell)), MAX_CANVAS)
+    const height = Math.min(Math.max(1, Math.ceil(layout.height * cell)), MAX_CANVAS)
 
     canvas.width = width
     canvas.height = height
@@ -237,6 +238,9 @@ class GlyphPreview extends HTMLElement {
 
       const left = (item.x + item.inkOffset) * cell
       const { pixels } = item.grid
+
+      ctx.fillStyle = '#000000' // Felplacerad?
+      paintShapes(ctx, item.shapes, { scale: cell, x: left, y: top })
 
       ctx.fillStyle = '#000000'
       for (let y = 0; y < size; y++) {

@@ -1,19 +1,20 @@
 /**
  * Backup of the whole project as a JSON file: every grid size with its
- * glyphs, side margin and font name, plus the preview text.
- * Pure logic, no DOM dependencies. Undo history is not included.
+ * glyphs (pixels and shapes), side margin and font name, plus the preview
+ * text. Pure logic, no DOM dependencies. Undo history is not included.
  *
- * @version 0.1.0
+ * @version 0.2.0
  */
 
-import { SIZES, isEmpty, serializeGrid, deserializeGrid } from './grid.js'
+import { SIZES } from './grid.js'
 import { ALL_GLYPHS } from './glyph-set.js'
+import { glyphIsEmpty, serializeGlyph, deserializeGlyph } from './glyph.js'
 
 export const BACKUP_FORMAT = 'pixel-glyph-editor-backup'
 
 /**
- * Makes the backup object. Empty drawings are left out.
- * @param {Map} sets - size -> { margin, name, glyphs: Map(char -> { grid }) }
+ * Makes the backup object. Empty glyphs are left out.
+ * @param {Map} sets - size -> { margin, name, glyphs: Map(char -> { grid, shapes }) }
  * @param {string} text - the preview text
  * @returns {Object} JSON-friendly object
  */
@@ -24,7 +25,7 @@ export function createBackup(sets, text = '') {
     const glyphs = {}
 
     for (const [char, record] of set.glyphs) {
-      if (!isEmpty(record.grid)) glyphs[char] = serializeGrid(record.grid)
+      if (!glyphIsEmpty(record)) glyphs[char] = serializeGlyph(record)
     }
 
     backup.sets[size] = { margin: set.margin, name: set.name, glyphs }
@@ -37,7 +38,7 @@ export function createBackup(sets, text = '') {
  * Reads and checks a backup file. Glyphs that are damaged, have the wrong
  * size or are not part of the glyph set are skipped.
  * @param {string} json - file content
- * @returns {Object} { text, sets: [{ size, margin, name, glyphs: [{ char, grid }] }] }, where margin and name are null when missing
+ * @returns {Object} { text, sets: [{ size, margin, name, glyphs: [{ char, grid, shapes }] }] }, where margin and name are null when missing
  * @throws {Error} if the file is not a backup from this editor
  */
 export function parseBackup(json) {
@@ -65,7 +66,7 @@ export function parseBackup(json) {
       if (!entry || entry.size !== size || typeof entry.bits !== 'string') continue
 
       try {
-        glyphs.push({ char, grid: deserializeGrid(entry) })
+        glyphs.push({ char, ...deserializeGlyph(entry) })
       } catch (error) {
         continue // A damaged glyph is skipped
       }
