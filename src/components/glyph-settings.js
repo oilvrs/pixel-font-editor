@@ -226,12 +226,12 @@ class GlyphSettings extends HTMLElement {
         </div>
       </section>
 
-            <p class="hint">
-        draw: drag · erase: right click or shift · select (M): drag a rectangle, then drag inside to move, drag a
-        handle to resize, drag outside a corner to rotate · shapes (S): click or drag to place, same handles ·
-        shift: keep proportions or a square, snap rotation to 45° · R: rotate a shape 90° · delete: remove
-        selected shape or pixels · copy ⌘C, paste ⌘V · undo ⌘Z · brush: [ ] or − + · glyph: , . step · G glyph
-        list · T text preview
+      <p class="hint">
+        draw: drag · erase: right click or shift · select (M): click a shape, or drag a rectangle around pixels and
+        shapes, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shapes (S):
+        click or drag to place, same handles · shift: keep proportions or a square, snap rotation to 45° · R: rotate
+        90° · delete: remove the selection · copy ⌘C, paste ⌘V · undo ⌘Z · brush: [ ] or − + · zoom: ⌘ or ctrl +
+        scroll, F fits the canvas · glyph: , . step · G glyph list · T text preview
       </p>
     `
   }

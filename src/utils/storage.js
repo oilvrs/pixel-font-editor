@@ -154,3 +154,22 @@ export function clearAll() {
     return false
   }
 }
+
+/**
+ * @param {number} size
+ * @returns {number|null} the saved on-screen size of one cell for a grid size, in CSS px
+ */
+export function loadCellSize(size) {
+  const raw = read(`${size}:zoom`)
+  const px = Number(raw)
+  return raw !== null && Number.isFinite(px) ? px : null
+}
+
+/**
+ * @param {number} size
+ * @param {number} px
+ * @returns {boolean}
+ */
+export function saveCellSize(size, px) {
+  return write(`${size}:zoom`, String(px))
+}

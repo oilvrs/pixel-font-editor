@@ -39,7 +39,7 @@ export function gridToPngBlob(grid, { transparent = true, targetPx = 512, shapes
     }
   }
 
-    ctx.fillStyle = '#000000'
+  ctx.fillStyle = '#000000'
   paintShapes(ctx, shapes, { scale })
 
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))

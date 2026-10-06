@@ -8,21 +8,24 @@
  *   saved automatically in localStorage.
  * - pen / eraser: drag to draw. Right click or shift erases. The brush is a
  *   square of 1 to 32 cells. The eraser does not touch shapes.
- * - select: drag a rectangle. Drag inside it to move the pixels, drag a
- *   handle to resize, drag just outside a corner to rotate. Shift keeps the
- *   proportions and snaps rotation to 45°. Without shift both are free.
- *   Enter or a click outside places the pixels, esc cancels. Clicking a
- *   shape selects it.
+ * - select: click a shape to select it, or drag a rectangle to select the
+ *   pixels and the shapes that are completely inside it. Drag inside the
+ *   selection to move it, drag a handle to resize, drag just outside a
+ *   corner to rotate. Shift keeps the proportions and snaps rotation to
+ *   45°. Without shift both are free. Enter or a click outside places it,
+ *   esc cancels.
  * - shapes: click or drag to place a rectangle, ellipse, quarter circle,
- *   concave corner or triangle. Shift makes it square. A selected shape
- *   has the same handles as selected pixels. R rotates it 90°.
- * - delete removes the selected shape, or the selected pixels.
- * - cmd/ctrl+c copies the selected pixels or shape, cmd/ctrl+v pastes.
+ *   concave corner or triangle. Shift makes it square.
+ * - delete removes the selection. r rotates it 90°. Arrows move it.
+ * - cmd/ctrl+c copies the selection, cmd/ctrl+v pastes.
  * - cmd/ctrl+z undoes, cmd/ctrl+shift+z redoes.
  * - , and . step through the glyphs, g shows or hides the glyph sidebar,
  *   t moves to the text preview.
+ * - The canvas can be made larger or smaller with the zoom buttons,
+ *   cmd/ctrl + scroll or a pinch, and f fits it to the window. This only
+ *   changes the display.
  *
- * @version 0.7.0
+ * @version 0.8.0
  */
 
 import {
@@ -44,7 +47,7 @@ import { createBackup, parseBackup } from '../core/backup.js'
 import { glyphName, exportFileName } from '../core/glyph-names.js'
 import { ALL_GLYPHS } from '../core/glyph-set.js'
 import { glyphIsEmpty, glyphBounds, cloneShapes, serializeGlyph, deserializeGlyph } from '../core/glyph.js'
-import { SHAPE_TYPES, shapeContains } from '../core/shapes.js'
+import { SHAPE_TYPES, shapeContains, shapeBounds, transformShape } from '../core/shapes.js'
 import {
   renderTransformed,
   toLocal,
@@ -53,7 +56,7 @@ import {
   resizeTransform,
   rotatedAngle
 } from '../core/transform.js'
-import { paintShapes } from '../utils/paint-shapes.js'
+import { paintShapes, traceShapes } from '../utils/paint-shapes.js'
 import { gridToPngBlob } from '../utils/export-png.js'
 import { downloadText, downloadBlob } from '../utils/download.js'
 import {
@@ -63,13 +66,20 @@ import {
   saveMargin,
   loadName,
   saveName,
+  loadCellSize,
+  saveCellSize,
   loadPanelOpen,
   savePanelOpen,
   clearAll as clearAllSaved
 } from '../utils/storage.js'
 
-// Cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
+// Default cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
 const CELL_PX = { 8: 64, 16: 32, 32: 20, 64: 12, 128: 7 }
+
+// Limits for the zoom: cell size in CSS px, and the largest canvas browsers handle reliably, in device px.
+const MIN_CELL = 4
+const MAX_CELL = 128
+const MAX_CANVAS_DEVICE = 8192
 
 // A darker grid line is drawn every N cells, as a counting aid.
 const MAJOR_EVERY = { 8: 4, 16: 4, 32: 8, 64: 8, 128: 8 }
@@ -126,6 +136,16 @@ function degrees(angle) {
 }
 
 /**
+ * Checks if two snapshots (pixels and shapes) are identical.
+ * @param {Object} a - { pixels, shapes }
+ * @param {Object} b - { pixels, shapes }
+ * @returns {boolean}
+ */
+function sameSnapshot(a, b) {
+  return pixelsEqual(a.pixels, b.pixels) && JSON.stringify(a.shapes) === JSON.stringify(b.shapes)
+}
+
+/**
  * The resize handles that fit on a frame. Edge handles are left out on
  * sides that are too short on screen.
  * @param {Object} t - transform
@@ -161,6 +181,8 @@ class GlyphEditor extends HTMLElement {
     this.attachShadow({ mode: 'open' })
     this.size = 32 // Active grid size
     this.sets = new Map() // size -> { margin, name, glyphs: Map(char -> { grid, shapes, history }) }, loaded on first use
+    this.cellSizes = {} // size -> on-screen size of one cell in CSS px, loaded on first use
+    this.wheelAccum = 0 // Collects small scroll steps, so a pinch does not zoom wildly
     this.currentChar = 'A' // The glyph being drawn
     this.panelOpen = loadPanelOpen() // The glyph sidebar is open by default and remembers its state
     this.copyMode = false // The next glyph picked in the panel receives a copy of the current drawing
@@ -188,12 +210,12 @@ class GlyphEditor extends HTMLElement {
     this.liftPoint = null // The same position as a precise point
     this.dragStart = null // { type, point, cell, transform, hx, hy } while moving, resizing or rotating
 
-    this.selection = null // { x, y, width, height } or null
-    this.selectedShape = null // Index of the selected shape in the current glyph, or null
-    this.clipboardKind = null // 'pixels' or 'shape': what was copied last
-    this.clipboard = null // { width, height, pixels }, shared between grid sizes and glyphs
-    this.shapeClipboard = null // A copied shape
-    this.floating = null // { source, cx, cy, w, h, angle, before, origin, cache }: pixels not yet placed
+    this.selection = null // { x, y, width, height }: the selected rectangle, or null
+    this.selectedShapes = [] // Indices of the selected shapes in the current glyph: one after a click, the ones inside the rectangle after a drag
+    this.clipboardKind = null // 'group' (pixels and shapes) or 'shape': what was copied last
+    this.clipboard = null // { region, shapes }, shapes relative to the top left of the region
+    this.shapeClipboard = null // A copied single shape
+    this.floating = null // The lifted selection, see buildFloating
     this.hoverCell = null // Cell under the pointer, for the brush preview
     this.hoverPoint = null // Precise pointer position in grid coordinates, for handles and cursors
 
@@ -219,7 +241,7 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * The bar with tools and brush size.
+   * The bar with tools, shapes, brush size and zoom.
    * @returns {HTMLElement}
    */
   get toolbar() {
@@ -343,11 +365,58 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * The selected shape, if there is one.
+   * The index of the selected shape when exactly one shape is selected on
+   * its own, without a rectangle selection or floating pixels. That shape
+   * has its own frame, which follows its rotation.
+   * @returns {number|null}
+   */
+  singleShapeIndex() {
+    if (this.selectedShapes.length !== 1 || this.selection || this.floating) return null
+    return this.selectedShapes[0]
+  }
+
+  /**
+   * The shape that is selected on its own, if there is one.
    * @returns {Object|null}
    */
   selectedShapeObject() {
-    return this.selectedShape === null ? null : this.session.shapes[this.selectedShape] || null
+    const index = this.singleShapeIndex()
+    return index === null ? null : this.session.shapes[index] || null
+  }
+
+  /**
+   * The on-screen size of one cell for a grid size, in CSS px.
+   * @param {number} size
+   * @returns {number}
+   */
+  cellSizeFor(size) {
+    if (this.cellSizes[size] === undefined) {
+      const saved = loadCellSize(size)
+      this.cellSizes[size] = this.clampCell(size, saved === null ? CELL_PX[size] : saved)
+    }
+    return this.cellSizes[size]
+  }
+
+  /**
+   * The on-screen size of one cell in the active grid size, in CSS px.
+   * @returns {number}
+   */
+  get cellCss() {
+    return this.cellSizeFor(this.size)
+  }
+
+  /**
+   * Keeps a cell size inside the limits: not smaller than MIN_CELL, not larger
+   * than MAX_CELL, and never so large that the canvas gets too big for the
+   * browser at the current pixel density.
+   * @param {number} size - grid size
+   * @param {number} px
+   * @returns {number}
+   */
+  clampCell(size, px) {
+    const dpr = window.devicePixelRatio || 1
+    const max = Math.min(MAX_CELL, Math.floor(MAX_CANVAS_DEVICE / (size * dpr)))
+    return clamp(Math.round(px), MIN_CELL, Math.max(MIN_CELL, max))
   }
 
   /**
@@ -370,6 +439,7 @@ class GlyphEditor extends HTMLElement {
     })
 
     this.syncToolbar()
+    this.updateZoomLabel()
     this.panel.rebuild()
     this.preview.refresh()
     this.updateNotice()
@@ -390,8 +460,8 @@ class GlyphEditor extends HTMLElement {
 
   /**
    * Renders the HTML template and styles into the shadow DOM.
-   * The canvas size is set in draw(), since it depends on the grid size
-   * and the screen's pixel density.
+   * The canvas size is set in draw(), since it depends on the grid size,
+   * the zoom and the screen's pixel density.
    */
   render() {
     this.shadowRoot.innerHTML = `
@@ -410,7 +480,7 @@ class GlyphEditor extends HTMLElement {
         .main {
           box-sizing: border-box;
           width: 100%;
-          max-width: 1000px;
+          max-width: 1200px;
           margin: 0 auto;
           padding: 1.5rem 2rem;
           min-width: 0;
@@ -510,10 +580,13 @@ class GlyphEditor extends HTMLElement {
     canvas.addEventListener('pointercancel', () => this.endDrag())
     canvas.addEventListener('pointerleave', () => this.onPointerLeave())
     canvas.addEventListener('contextmenu', (e) => e.preventDefault()) // Right click is the eraser
+    canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
 
     toolbar.addEventListener('tool-change', (e) => this.setTool(e.detail.tool))
     toolbar.addEventListener('shape-change', (e) => this.setShapeType(e.detail.shape))
     toolbar.addEventListener('brush-step', (e) => this.changeBrush(e.detail.delta))
+    toolbar.addEventListener('zoom-step', (e) => this.changeZoom(e.detail.delta))
+    toolbar.addEventListener('zoom-fit', () => this.fitZoom())
     toolbar.addEventListener('clear', () => this.clear())
     toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
 
@@ -540,10 +613,10 @@ class GlyphEditor extends HTMLElement {
   /**
    * Handles keyboard shortcuts:
    * cmd/ctrl+z undo, cmd/ctrl+shift+z or ctrl+y redo, cmd/ctrl+c copy,
-   * cmd/ctrl+v paste, enter place, esc cancel, delete remove, arrows nudge
-   * selected or floating pixels or a shape, r rotates a shape 90°,
-   * [ ] or - + change brush size, b / e / m / s pick a tool,
-   * , and . step through glyphs, g glyph sidebar, t text preview.
+   * cmd/ctrl+v paste, enter place, esc cancel, delete remove, arrows nudge,
+   * r rotates 90°, [ ] or - + change brush size, b / e / m / s pick a tool,
+   * f fits the canvas, , and . step through glyphs, g glyph sidebar,
+   * t text preview.
    * @param {KeyboardEvent} e
    */
   onKeyDown(e) {
@@ -577,25 +650,22 @@ class GlyphEditor extends HTMLElement {
 
     // Plain keys. Alt is allowed, since [ and ] need it on a Swedish Mac keyboard.
     const arrows = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] }
+    const canMove = this.floating || this.selectedShapeObject() || (this.tool === 'select' && this.selection)
 
     if (key === 'enter' && this.floating) {
       e.preventDefault()
       this.commitFloating()
     } else if (key === 'escape') {
       if (this.floating) this.cancelFloating()
-      else if (this.selectedShape !== null) this.deselectShape()
-      else if (this.selection) this.clearSelection()
+      else if (this.selection || this.selectedShapes.length > 0) this.clearSelection()
       else if (this.copyMode) this.cancelCopy()
     } else if (key === 'delete' || key === 'backspace') {
       if (this.deleteSelected()) e.preventDefault()
-    } else if (
-      arrows[key] &&
-      (this.floating || this.selectedShape !== null || (this.tool === 'select' && this.selection))
-    ) {
+    } else if (arrows[key] && canMove) {
       e.preventDefault()
       const [dx, dy] = arrows[key]
 
-      if (this.selectedShape !== null) {
+      if (this.selectedShapeObject()) {
         this.nudgeShape(dx, dy)
       } else {
         if (!this.floating) this.liftSelection()
@@ -615,7 +685,9 @@ class GlyphEditor extends HTMLElement {
     } else if (key === 's') {
       this.setTool('shapes')
     } else if (key === 'r') {
-      this.rotateSelectedShape(e.shiftKey ? -1 : 1)
+      this.rotateSelected(e.shiftKey ? -1 : 1)
+    } else if (key === 'f') {
+      this.fitZoom()
     } else if (key === ',') {
       this.stepGlyph(-1)
     } else if (key === '.') {
@@ -629,9 +701,12 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Redraws when the window or browser zoom changes.
+   * Redraws when the window or browser zoom changes. The cell size is
+   * checked again, since the allowed maximum depends on the pixel density.
    */
   onResize() {
+    this.cellSizes = {}
+    this.updateZoomLabel()
     this.draw()
   }
 
@@ -640,6 +715,69 @@ class GlyphEditor extends HTMLElement {
    */
   onPageHide() {
     this.flushSaves()
+  }
+
+  /**
+   * Zooms the canvas with cmd/ctrl + scroll or a pinch on a trackpad (the
+   * browser reports a pinch as scrolling with ctrl held). Plain scrolling is
+   * left alone, so a large canvas can still be scrolled.
+   * @param {WheelEvent} e
+   */
+  onWheel(e) {
+    if (!e.ctrlKey && !e.metaKey) return
+
+    e.preventDefault()
+    this.wheelAccum += e.deltaY
+
+    if (Math.abs(this.wheelAccum) < 30) return
+
+    this.changeZoom(this.wheelAccum < 0 ? 1 : -1)
+    this.wheelAccum = 0
+  }
+
+  /**
+   * Makes the canvas larger or smaller. Each step changes the cell size by
+   * about 15%, and always by at least one pixel.
+   * @param {number} delta - 1 or -1
+   */
+  changeZoom(delta) {
+    const current = this.cellCss
+    let next = Math.round(delta > 0 ? current * 1.15 : current / 1.15)
+    if (next === current) next = current + delta
+
+    this.setCellSize(next)
+  }
+
+  /**
+   * Fits the canvas to the space in the window, in width and height.
+   */
+  fitZoom() {
+    const stage = this.shadowRoot.querySelector('.stage')
+    const space = Math.min(stage.clientWidth - 2, window.innerHeight - 240)
+
+    this.setCellSize(Math.floor(space / this.size))
+  }
+
+  /**
+   * Sets and saves the on-screen size of one cell for the active grid size.
+   * @param {number} px - CSS px
+   */
+  setCellSize(px) {
+    const next = this.clampCell(this.size, px)
+
+    this.cellSizes[this.size] = next
+    saveCellSize(this.size, next)
+
+    this.updateZoomLabel()
+    this.draw()
+  }
+
+  /**
+   * Shows the zoom as a percentage of the default cell size.
+   */
+  updateZoomLabel() {
+    const percent = Math.round((this.cellCss / CELL_PX[this.size]) * 100)
+    this.toolbar.setAttribute('zoom', `${percent}%`)
   }
 
   /**
@@ -763,6 +901,31 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
+   * The shapes of the current glyph that are completely inside a rectangle.
+   * @param {Object} rect - { x, y, width, height } in cells
+   * @returns {number[]} indices in the shape list
+   */
+  shapesInside(rect) {
+    const eps = 1e-6
+    const found = []
+
+    this.session.shapes.forEach((shape, index) => {
+      const b = shapeBounds(shape)
+
+      if (
+        b.minX >= rect.x - eps &&
+        b.minY >= rect.y - eps &&
+        b.maxX <= rect.x + rect.width + eps &&
+        b.maxY <= rect.y + rect.height + eps
+      ) {
+        found.push(index)
+      }
+    })
+
+    return found
+  }
+
+  /**
    * Builds a shape from the cell where a drag started to the cell it has
    * reached. The right angle of quarter, concave and triangle ends up at the
    * start cell, since a drag to the left or upwards mirrors the shape.
@@ -810,22 +973,14 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Selects a shape. Floating pixels are placed and the pixel selection is dropped.
+   * Selects one shape. Floating pixels are placed and the rectangle
+   * selection is dropped.
    * @param {number} index
    */
   selectShape(index) {
     this.commitFloating()
     this.selection = null
-    this.selectedShape = index
-    this.updateNotice()
-    this.draw()
-  }
-
-  /**
-   * Deselects the shape.
-   */
-  deselectShape() {
-    this.selectedShape = null
+    this.selectedShapes = [index]
     this.updateNotice()
     this.draw()
   }
@@ -841,20 +996,21 @@ class GlyphEditor extends HTMLElement {
     record.shapes.push({ ...shape })
 
     this.selection = null
-    this.selectedShape = record.shapes.length - 1
+    this.selectedShapes = [record.shapes.length - 1]
     this.markChanged()
     this.updateNotice()
     this.draw()
   }
 
   /**
-   * The frame that can be grabbed right now, as a transform: the selected
-   * shape, the floating pixels, or the selection while the select tool is
-   * active.
+   * The frame that can be grabbed right now, as a transform: the shape that
+   * is selected on its own, the floating selection, or the rectangle
+   * selection while the select tool is active.
    * @returns {Object|null} { cx, cy, w, h, angle }
    */
   currentFrame() {
-    if (this.selectedShape !== null) return this.selectedShapeObject()
+    const shape = this.selectedShapeObject()
+    if (shape) return shape
     if (this.floating) return this.floating
 
     if (this.tool === 'select' && this.selection && this.dragMode !== 'marquee') {
@@ -866,12 +1022,12 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * The object a move, resize or rotation changes: the selected shape or
-   * the floating pixels.
+   * The object a move, resize or rotation changes: the shape that is
+   * selected on its own, or the floating selection.
    * @returns {Object|null}
    */
   transformTarget() {
-    return this.selectedShape !== null ? this.selectedShapeObject() : this.floating
+    return this.selectedShapeObject() || this.floating
   }
 
   /**
@@ -908,8 +1064,9 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Starts moving, resizing or rotating the selected shape or the floating
-   * pixels. For a shape, the state before the drag is kept for undo.
+   * Starts moving, resizing or rotating the shape that is selected on its
+   * own, or the floating selection. For a shape, the state before the drag
+   * is kept for undo.
    * @param {Object} hit - { type, hx, hy } from hitTest
    * @param {Object} point - pointer position in grid coordinates
    * @param {Object} cell - the cell under the pointer
@@ -918,7 +1075,7 @@ class GlyphEditor extends HTMLElement {
     const { cx, cy, w, h, angle } = this.transformTarget()
 
     this.dragMode = hit.type
-    this.dragTarget = this.selectedShape !== null ? 'shape' : 'floating'
+    this.dragTarget = this.selectedShapeObject() ? 'shape' : 'floating'
     this.dragStart = { type: hit.type, point, cell, transform: { cx, cy, w, h, angle }, hx: hit.hx, hy: hit.hy }
 
     if (this.dragTarget === 'shape') {
@@ -928,7 +1085,8 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Applies a change to the selected shape or the floating pixels.
+   * Applies a change to the shape that is selected on its own, or to the
+   * floating selection.
    * @param {Object} changes - any of cx, cy, w, h, angle
    */
   applyTransform(changes) {
@@ -948,10 +1106,9 @@ class GlyphEditor extends HTMLElement {
 
   /**
    * Starts a drag. Depending on what is under the pointer and the tool, it
-   * moves, resizes or rotates the selected shape, selected pixels or
-   * floating pixels, selects a shape, places a new shape, drags a new
-   * selection or starts a stroke. Right click, shift or the eraser tool
-   * erases.
+   * moves, resizes or rotates the selection, selects a shape, places a new
+   * shape, drags a new selection or starts a stroke. Right click, shift or
+   * the eraser tool erases.
    * @param {PointerEvent} e
    */
   onPointerDown(e) {
@@ -965,13 +1122,13 @@ class GlyphEditor extends HTMLElement {
     const point = this.pointFromEvent(e)
     const cell = this.cellOf(point)
     const frame = this.currentFrame()
-    const shapeFrame = this.selectedShape !== null
+    const shapeFrame = this.selectedShapeObject() !== null
 
     if (frame) {
       const hit = this.hitTest(frame, point)
 
       if (hit && hit.type === 'move' && !this.floating && !shapeFrame) {
-        // The pixels are lifted on the first movement, so a plain click changes nothing
+        // The selection is lifted on the first movement, so a plain click changes nothing
         this.dragMode = 'liftpending'
         this.liftStart = cell
         this.liftPoint = point
@@ -984,7 +1141,7 @@ class GlyphEditor extends HTMLElement {
         return
       }
 
-      if (this.floating) this.commitFloating() // A click away from the frame places the pixels
+      if (this.floating) this.commitFloating() // A click away from the frame places the selection
     }
 
     if (this.tool === 'select' || this.tool === 'shapes') {
@@ -997,7 +1154,7 @@ class GlyphEditor extends HTMLElement {
       }
     }
 
-    this.selectedShape = null // A click away from a shape deselects it
+    this.selectedShapes = [] // A click away from the selected shapes deselects them
 
     if (this.tool === 'shapes') {
       const record = this.session
@@ -1008,7 +1165,7 @@ class GlyphEditor extends HTMLElement {
       this.selection = null
 
       record.shapes.push(this.makeShape(cell, cell, e.shiftKey))
-      this.selectedShape = record.shapes.length - 1
+      this.selectedShapes = [record.shapes.length - 1]
       this.dragMode = 'create'
 
       this.markChanged()
@@ -1021,6 +1178,7 @@ class GlyphEditor extends HTMLElement {
       this.dragMode = 'marquee'
       this.marquee = { start: cell, moved: false }
       this.selection = this.rectFromCells(cell, cell)
+      this.selectedShapes = this.shapesInside(this.selection)
       this.draw()
       return
     }
@@ -1078,6 +1236,7 @@ class GlyphEditor extends HTMLElement {
       if (cell.x !== start.x || cell.y !== start.y) this.marquee.moved = true
 
       this.selection = this.rectFromCells(start, cell)
+      this.selectedShapes = this.shapesInside(this.selection)
       redraw = true
     } else if (this.dragMode === 'move') {
       const { cell: startCell, transform } = this.dragStart
@@ -1127,6 +1286,7 @@ class GlyphEditor extends HTMLElement {
 
     if (this.dragMode === 'marquee' && !this.marquee.moved) {
       this.selection = null
+      this.selectedShapes = []
     }
 
     this.dragMode = null
@@ -1139,11 +1299,13 @@ class GlyphEditor extends HTMLElement {
     this.liftStart = null
     this.liftPoint = null
     this.dragStart = null
+    this.updateNotice()
     this.draw()
   }
 
   /**
-   * Copies the selected shape or the selected pixels.
+   * Copies the selected shape, or the selected rectangle with the shapes
+   * inside it.
    * @returns {boolean} true if something was copied
    */
   copySelection() {
@@ -1159,15 +1321,25 @@ class GlyphEditor extends HTMLElement {
     if (!this.selection) return false
 
     const { x, y, width, height } = this.selection
-    this.clipboard = extractRegion(this.grid, x, y, width, height)
-    this.clipboardKind = 'pixels'
+    const { shapes } = this.session
+
+    this.clipboard = {
+      region: extractRegion(this.grid, x, y, width, height),
+      shapes: this.selectedShapes.map((index) => ({
+        ...shapes[index],
+        cx: shapes[index].cx - x,
+        cy: shapes[index].cy - y
+      }))
+    }
+    this.clipboardKind = 'group'
     return true
   }
 
   /**
-   * Pastes what was copied last. A shape is added one cell down and to the
-   * right of the copy. Pixels are pasted as floating pixels at the pointer,
-   * or at the top left corner if the pointer is not over the canvas.
+   * Pastes what was copied last. A single shape is added one cell down and
+   * to the right of the copy. A rectangle with shapes is pasted as a
+   * floating selection at the pointer, or at the top left corner if the
+   * pointer is not over the canvas.
    * @returns {boolean} true if something was pasted
    */
   paste() {
@@ -1182,89 +1354,23 @@ class GlyphEditor extends HTMLElement {
       return true
     }
 
-    if (this.clipboardKind !== 'pixels' || !this.clipboard) return false
+    if (this.clipboardKind !== 'group' || !this.clipboard) return false
 
-    const { width, height } = this.clipboard
+    const { region, shapes } = this.clipboard
     const anchor = this.hoverCell || { x: 0, y: 0 }
-    const x = clamp(anchor.x, 0, Math.max(0, this.size - width))
-    const y = clamp(anchor.y, 0, Math.max(0, this.size - height))
+    const x = clamp(anchor.x, 0, Math.max(0, this.size - region.width))
+    const y = clamp(anchor.y, 0, Math.max(0, this.size - region.height))
 
-    this.selectedShape = null
-    this.floating = {
-      source: this.clipboard,
-      cx: x + width / 2,
-      cy: y + height / 2,
-      w: width,
-      h: height,
-      angle: 0,
-      before: null, // A paste has no lift, so the undo state is taken when it is placed
-      origin: null,
-      cache: null
-    }
-
-    this.updateNotice()
-    this.draw()
-    return true
-  }
-
-  /**
-   * Removes the selected shape, the floating pixels or the selected pixels.
-   * This is an undo step.
-   * @returns {boolean} true if something was removed
-   */
-  deleteSelected() {
     const record = this.session
+    const before = this.snapshot()
+    const indices = shapes.map((shape) => {
+      record.shapes.push({ ...shape, cx: shape.cx + x, cy: shape.cy + y })
+      return record.shapes.length - 1
+    })
 
-    if (this.selectedShape !== null) {
-      pushState(record.history, this.snapshot())
-      record.shapes.splice(this.selectedShape, 1)
-      this.selectedShape = null
-      this.markChanged()
-      this.updateNotice()
-      this.draw()
-      return true
-    }
-
-    if (this.floating) {
-      const { before } = this.floating
-
-      this.floating = null
-      this.selection = null
-      if (before && !pixelsEqual(record.grid.pixels, before.pixels)) pushState(record.history, before) // The pixels were lifted, so removing them is a change
-
-      this.markChanged()
-      this.updateNotice()
-      this.draw()
-      return true
-    }
-
-    if (this.selection) {
-      const before = this.snapshot()
-      const { x, y, width, height } = this.selection
-
-      if (clearRegion(record.grid, x, y, width, height)) {
-        pushState(record.history, before)
-        this.markChanged()
-      }
-
-      this.draw()
-      return true
-    }
-
-    return false
-  }
-
-  /**
-   * Rotates the selected shape a quarter turn. This is an undo step.
-   * @param {number} direction - 1 clockwise, -1 counter-clockwise
-   * @returns {boolean} true if there was a shape to rotate
-   */
-  rotateSelectedShape(direction) {
-    const shape = this.selectedShapeObject()
-    if (!shape) return false
-
-    pushState(this.session.history, this.snapshot())
-    shape.angle += (direction * Math.PI) / 2
+    this.selection = null
+    this.selectedShapes = indices
+    this.floating = this.buildFloating(region, x, y, indices, before, null)
 
     this.markChanged()
     this.updateNotice()
@@ -1273,7 +1379,80 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Moves the selected shape one step. This is an undo step.
+   * Removes the selection: the shape that is selected on its own, or the
+   * floating selection, or the selected rectangle with the shapes inside it.
+   * This is an undo step.
+   * @returns {boolean} true if something was removed
+   */
+  deleteSelected() {
+    const record = this.session
+    const removeShapes = (indices) => [...indices].sort((a, b) => b - a).forEach((index) => record.shapes.splice(index, 1))
+
+    const single = this.singleShapeIndex()
+    if (single !== null) {
+      pushState(record.history, this.snapshot())
+      record.shapes.splice(single, 1)
+    } else if (this.floating) {
+      const { before, shapeIndices } = this.floating // The pixels were lifted already, so only the shapes are left to remove
+
+      this.floating = null
+      removeShapes(shapeIndices)
+      if (!sameSnapshot(this.snapshot(), before)) pushState(record.history, before)
+    } else if (this.selection || this.selectedShapes.length > 0) {
+      const before = this.snapshot()
+
+      if (this.selection) {
+        const { x, y, width, height } = this.selection
+        clearRegion(record.grid, x, y, width, height)
+      }
+
+      removeShapes(this.selectedShapes)
+      if (!sameSnapshot(this.snapshot(), before)) pushState(record.history, before)
+    } else {
+      return false
+    }
+
+    this.selection = null
+    this.selectedShapes = []
+    this.markChanged()
+    this.updateNotice()
+    this.draw()
+    return true
+  }
+
+  /**
+   * Rotates the selection a quarter turn: the shape that is selected on its
+   * own, or the selected rectangle with its pixels and shapes. This is an
+   * undo step.
+   * @param {number} direction - 1 clockwise, -1 counter-clockwise
+   * @returns {boolean} true if there was something to rotate
+   */
+  rotateSelected(direction) {
+    const shape = this.selectedShapeObject()
+
+    if (shape) {
+      pushState(this.session.history, this.snapshot())
+      shape.angle += (direction * Math.PI) / 2
+
+      this.markChanged()
+      this.updateNotice()
+      this.draw()
+      return true
+    }
+
+    if (this.floating || (this.tool === 'select' && this.selection)) {
+      if (!this.floating) this.liftSelection()
+
+      this.updateFloating({ angle: this.floating.angle + (direction * Math.PI) / 2 })
+      this.draw()
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Moves the shape that is selected on its own one step. This is an undo step.
    * @param {number} dx - cells
    * @param {number} dy - cells
    */
@@ -1290,10 +1469,41 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Lifts the selected pixels out of the grid and makes them floating. The
-   * state from before the lift is kept, so the whole change is one undo
-   * step and can be cancelled.
-   * @returns {Object|null} the floating pixels, or null if nothing is selected
+   * Builds the floating selection: a region of pixels and the shapes that
+   * belong with it, which can be moved, resized and rotated as one.
+   *
+   * The shapes stay in the glyph's shape list and are updated from their
+   * original state (shapeSources) every time the frame changes. `before` is
+   * the state of the glyph before the lift, kept for undo and cancel.
+   * @param {Object} region - { width, height, pixels }
+   * @param {number} x - left edge in cells
+   * @param {number} y - top edge in cells
+   * @param {number[]} indices - the shapes in the group
+   * @param {Object} before - snapshot of the glyph before the lift or paste
+   * @param {Object|null} origin - the selection the pixels came from
+   * @returns {Object}
+   */
+  buildFloating(region, x, y, indices, before, origin) {
+    const frame = { cx: x + region.width / 2, cy: y + region.height / 2, w: region.width, h: region.height }
+
+    return {
+      source: region,
+      ...frame,
+      angle: 0,
+      frame0: frame,
+      shapeIndices: indices,
+      shapeSources: indices.map((index) => ({ ...this.session.shapes[index] })),
+      before,
+      origin,
+      cache: null
+    }
+  }
+
+  /**
+   * Lifts the selected rectangle, with the shapes inside it, and makes it
+   * floating. The state from before the lift is kept, so the whole change is
+   * one undo step and can be cancelled.
+   * @returns {Object|null} the floating selection, or null if nothing is selected
    */
   liftSelection() {
     if (!this.selection) return null
@@ -1301,18 +1511,14 @@ class GlyphEditor extends HTMLElement {
     const { grid } = this.session
     const { x, y, width, height } = this.selection
 
-    this.selectedShape = null
-    this.floating = {
-      source: extractRegion(grid, x, y, width, height),
-      cx: x + width / 2,
-      cy: y + height / 2,
-      w: width,
-      h: height,
-      angle: 0,
-      before: this.snapshot(), // Restored on cancel, pushed to history on place
-      origin: this.selection,
-      cache: null
-    }
+    this.floating = this.buildFloating(
+      extractRegion(grid, x, y, width, height),
+      x,
+      y,
+      this.selectedShapes.slice(),
+      this.snapshot(),
+      this.selection
+    )
 
     clearRegion(grid, x, y, width, height)
     this.selection = null
@@ -1323,12 +1529,26 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Changes the transform of the floating pixels.
+   * Changes the transform of the floating selection. The shapes in the group
+   * follow, mapped from their original state.
    * @param {Object} changes - any of cx, cy, w, h, angle
    */
   updateFloating(changes) {
-    Object.assign(this.floating, changes)
-    this.floating.cache = null
+    const floating = this.floating
+
+    Object.assign(floating, changes)
+    floating.cache = null
+
+    if (floating.shapeIndices.length > 0) {
+      const { shapes } = this.session
+
+      floating.shapeIndices.forEach((index, i) => {
+        shapes[index] = transformShape(floating.shapeSources[i], floating.frame0, floating)
+      })
+
+      this.markChanged()
+    }
+
     this.updateNotice()
   }
 
@@ -1345,19 +1565,21 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Places the floating pixels in the grid and selects them. If nothing
-   * changed compared to before the lift or paste, no undo step is added.
+   * Places the floating selection: the pixels are added to the grid, and the
+   * area they cover becomes the selection. The shapes are already in place.
+   * If nothing changed compared to before the lift or paste, no undo step is
+   * added.
    */
   commitFloating() {
     if (!this.floating) return
 
-    const { grid, history } = this.session
+    const record = this.session
     const image = this.floatingImage()
-    const start = this.floating.before || this.snapshot() // A paste has no lift, so the state is taken now
+    const { before } = this.floating
 
     this.floating = null
-    pasteRegion(grid, image.region, image.x, image.y)
-    if (!pixelsEqual(grid.pixels, start.pixels)) pushState(history, start)
+    pasteRegion(record.grid, image.region, image.x, image.y)
+    if (!sameSnapshot(this.snapshot(), before)) pushState(record.history, before)
 
     this.selection = this.rectInsideGrid(image.x, image.y, image.region.width, image.region.height)
     this.markChanged()
@@ -1366,36 +1588,38 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Throws away the floating pixels. Lifted pixels go back to where they
-   * were, and the old selection returns.
+   * Throws away the floating selection. Lifted pixels and shapes go back to
+   * where they were, and the old selection returns. A cancelled paste leaves
+   * nothing behind.
    */
   cancelFloating() {
     if (!this.floating) return
 
     const { before, origin } = this.floating
 
-    if (before) {
-      this.grid.pixels.set(before.pixels)
-      this.selection = origin
-      this.markChanged()
-    }
+    this.restoreSnapshot(this.session, before)
+    this.selection = origin
+    if (!origin) this.selectedShapes = []
 
     this.floating = null
+    this.markChanged()
     this.updateNotice()
     this.draw()
   }
 
   /**
-   * Removes the selection rectangle.
+   * Removes the selection rectangle and deselects all shapes.
    */
   clearSelection() {
     this.selection = null
+    this.selectedShapes = []
+    this.updateNotice()
     this.draw()
   }
 
   /**
-   * Steps back one change in the current glyph. While pixels float, it
-   * cancels them instead.
+   * Steps back one change in the current glyph. While a selection floats,
+   * it cancels it instead.
    */
   undo() {
     if (this.floating) {
@@ -1408,7 +1632,7 @@ class GlyphEditor extends HTMLElement {
     if (!previous) return
 
     this.restoreSnapshot(record, previous)
-    this.selectedShape = null
+    this.selectedShapes = []
     this.markChanged()
     this.updateNotice()
     this.draw()
@@ -1425,22 +1649,24 @@ class GlyphEditor extends HTMLElement {
     if (!next) return
 
     this.restoreSnapshot(record, next)
-    this.selectedShape = null
+    this.selectedShapes = []
     this.markChanged()
     this.updateNotice()
     this.draw()
   }
 
   /**
-   * Switches tool. Floating pixels are placed first, and a selected shape
-   * is deselected unless the new tool can work with shapes.
+   * Switches tool. A floating selection is placed first. Selected shapes
+   * are deselected unless the new tool can work with them. Switching to
+   * select picks up the shapes inside an existing rectangle selection.
    * @param {string} tool - 'pen', 'eraser', 'select' or 'shapes'
    */
   setTool(tool) {
     this.commitFloating()
     this.tool = tool
 
-    if (tool !== 'select' && tool !== 'shapes') this.selectedShape = null
+    if (tool !== 'select' && tool !== 'shapes') this.selectedShapes = []
+    if (tool === 'select' && this.selection) this.selectedShapes = this.shapesInside(this.selection)
 
     this.toolbar.setAttribute('tool', tool)
     this.updateNotice()
@@ -1469,7 +1695,7 @@ class GlyphEditor extends HTMLElement {
     this.commitFloating()
     this.size = size
     this.selection = null
-    this.selectedShape = null
+    this.selectedShapes = []
     this.hoverCell = null
     this.hoverPoint = null
 
@@ -1478,6 +1704,7 @@ class GlyphEditor extends HTMLElement {
     settings.setAttribute('margin', this.set.margin)
     settings.setAttribute('font-name', this.set.name)
 
+    this.updateZoomLabel()
     this.panel.rebuild()
     this.preview.refresh()
     this.updateNotice()
@@ -1496,7 +1723,7 @@ class GlyphEditor extends HTMLElement {
 
   /**
    * Empties the current glyph, pixels and shapes. This is an undo step.
-   * Floating pixels are cancelled first.
+   * A floating selection is cancelled first.
    */
   clear() {
     this.cancelFloating()
@@ -1507,7 +1734,8 @@ class GlyphEditor extends HTMLElement {
     pushState(record.history, this.snapshot())
     clearGrid(record.grid)
     record.shapes = []
-    this.selectedShape = null
+    this.selection = null
+    this.selectedShapes = []
 
     this.markChanged()
     this.updateNotice()
@@ -1563,8 +1791,8 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Switches to another glyph. Floating pixels are placed first. Every glyph
-   * keeps its own pixels, shapes and undo history.
+   * Switches to another glyph. A floating selection is placed first. Every
+   * glyph keeps its own pixels, shapes and undo history.
    * @param {string} char
    */
   setGlyph(char) {
@@ -1573,7 +1801,7 @@ class GlyphEditor extends HTMLElement {
     this.commitFloating()
     this.currentChar = char
     this.selection = null
-    this.selectedShape = null
+    this.selectedShapes = []
 
     this.syncToolbar()
     this.panel.highlight()
@@ -1702,7 +1930,7 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Saves the current glyph as an SVG or PNG file. Floating pixels are
+   * Saves the current glyph as an SVG or PNG file. A floating selection is
    * placed first. The file name comes from the glyph.
    * @param {string} format - 'svg' or 'png'
    */
@@ -1829,8 +2057,9 @@ class GlyphEditor extends HTMLElement {
     this.dirty.clear()
     clearAllSaved()
     this.sets.clear()
+    this.cellSizes = {}
     this.selection = null
-    this.selectedShape = null
+    this.selectedShapes = []
 
     for (const saved of backup.sets) {
       const set = {
@@ -1855,6 +2084,7 @@ class GlyphEditor extends HTMLElement {
 
     this.syncToolbar()
     this.settings.setAttribute('margin', this.set.margin)
+    this.updateZoomLabel()
     this.panel.rebuild()
     this.flash(`restored ${count} glyphs`)
     this.updateNotice()
@@ -1863,22 +2093,26 @@ class GlyphEditor extends HTMLElement {
 
   /**
    * Shows a passive text line under the canvas: the last message, the
-   * selected shape, the size and angle of floating pixels, the advance width
+   * selection, the size and angle of a floating selection, the advance width
    * the export will give, and a note about low resolution.
    */
   updateNotice() {
     const parts = []
+    const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`
 
     if (this.message) parts.push(this.message)
 
     const shape = this.selectedShapeObject()
     if (shape) {
       parts.push(`${shape.type} ${Math.abs(shape.w)}×${Math.abs(shape.h)} px, ${degrees(shape.angle)}° · delete removes it · R rotates 90°`)
+    } else if (!this.floating && this.selectedShapes.length > 0) {
+      parts.push(`${plural(this.selectedShapes.length, 'shape')} selected`)
     }
 
     if (this.floating) {
-      const { w, h, angle } = this.floating
-      parts.push(`floating ${Math.abs(w)}×${Math.abs(h)} px, ${degrees(angle)}° · enter to place, esc to cancel`)
+      const { w, h, angle, shapeIndices } = this.floating
+      const extra = shapeIndices.length > 0 ? ` + ${plural(shapeIndices.length, 'shape')}` : ''
+      parts.push(`floating ${Math.abs(w)}×${Math.abs(h)} px${extra}, ${degrees(angle)}° · enter to place, esc to cancel`)
     }
 
     const bounds = glyphBounds(this.session)
@@ -1928,8 +2162,8 @@ class GlyphEditor extends HTMLElement {
    * so every grid line is exactly one device pixel wide and evenly spaced.
    * Grid lines are drawn first, so filled pixels cover them and neighbouring
    * pixels read as one solid shape. Shapes come next, then guides, the
-   * selection or floating pixels, the frame of a selected shape and the
-   * brush preview.
+   * selection or floating pixels, outlines of selected shapes, the frame of
+   * a shape selected on its own and the brush preview.
    */
   draw() {
     const canvas = this.shadowRoot.getElementById('canvas')
@@ -1937,11 +2171,12 @@ class GlyphEditor extends HTMLElement {
     const { grid, shapes } = this.session
     const { size, pixels } = grid
 
+    const css = this.cellCss
     const dpr = window.devicePixelRatio || 1
-    const cell = Math.round(CELL_PX[size] * dpr)
+    const cell = Math.round(css * dpr)
     const line = Math.max(1, Math.round(dpr))
     const total = cell * size
-    const view = { ctx, size, cell, line, total, dpr }
+    const view = { ctx, size, cell, line, total, dpr, css }
 
     if (canvas.width !== total) {
       canvas.width = total
@@ -1976,10 +2211,15 @@ class GlyphEditor extends HTMLElement {
 
     if (this.showGuides) this.drawGuides(view)
 
-    const shape = this.selectedShapeObject()
-    if (shape) this.drawFrame(view, shape)
-    else if (this.floating) this.drawFloating(view)
-    else if (this.selection) this.drawSelection(view)
+    const single = this.selectedShapeObject()
+    if (single) {
+      this.drawFrame(view, single)
+    } else {
+      if (this.floating) this.drawFloating(view)
+      else if (this.selection) this.drawSelection(view)
+
+      this.drawShapeOutlines(view, this.selectedShapes)
+    }
 
     this.drawHover(view)
     this.updateCursor()
@@ -1989,7 +2229,7 @@ class GlyphEditor extends HTMLElement {
   /**
    * Draws the font metrics as horizontal guide lines on top of the pixels.
    * Lines are centered on their row boundary and kept inside the canvas.
-   * @param {Object} view - { ctx, size, cell, line, total, dpr }
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
    */
   drawGuides({ ctx, size, cell, line, total }) {
     const thickness = line * 2
@@ -2002,9 +2242,25 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
+   * Draws a blue outline around shapes that are part of a selection.
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
+   * @param {number[]} indices - indices in the shape list
+   */
+  drawShapeOutlines({ ctx, cell, line }, indices) {
+    const shapes = indices.map((index) => this.session.shapes[index]).filter(Boolean)
+    if (shapes.length === 0) return
+
+    ctx.lineWidth = line
+    ctx.setLineDash([])
+    ctx.strokeStyle = '#0000ff'
+    traceShapes(ctx, shapes, { scale: cell })
+    ctx.stroke()
+  }
+
+  /**
    * Draws the floating pixels in blue, so they read as not placed yet, with
    * their frame and handles.
-   * @param {Object} view - { ctx, size, cell, line, total, dpr }
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
    */
   drawFloating(view) {
     const { ctx, size, cell } = view
@@ -2027,7 +2283,7 @@ class GlyphEditor extends HTMLElement {
   /**
    * Draws the selection. With the select tool it gets handles. Otherwise,
    * and while it is being dragged out, it is a plain dashed rectangle.
-   * @param {Object} view - { ctx, size, cell, line, total, dpr }
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
    */
   drawSelection(view) {
     const frame = this.currentFrame()
@@ -2043,10 +2299,10 @@ class GlyphEditor extends HTMLElement {
   /**
    * Draws a dashed black-and-white outline around a transform frame, and
    * its resize handles.
-   * @param {Object} view - { ctx, size, cell, line, total, dpr }
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
    * @param {Object} t - transform
    */
-  drawFrame({ ctx, size, cell, line, dpr }, t) {
+  drawFrame({ ctx, cell, line, dpr, css }, t) {
     const corners = transformCorners(t)
 
     const tracePath = () => {
@@ -2075,7 +2331,7 @@ class GlyphEditor extends HTMLElement {
     ctx.fillStyle = '#ffffff'
     ctx.strokeStyle = '#000000'
 
-    for (const [hx, hy] of visibleHandles(t, CELL_PX[size])) {
+    for (const [hx, hy] of visibleHandles(t, css)) {
       const p = fromLocal(t, (hx * Math.abs(t.w)) / 2, (hy * Math.abs(t.h)) / 2)
       const px = Math.round(p.x * cell)
       const py = Math.round(p.y * cell)
@@ -2088,7 +2344,7 @@ class GlyphEditor extends HTMLElement {
   /**
    * Draws a dashed black-and-white outline around a rectangle of cells, kept
    * inside the canvas.
-   * @param {Object} view - { ctx, size, cell, line, total, dpr }
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
    * @param {number} x - left cell
    * @param {number} y - top cell
    * @param {number} width - in cells
@@ -2122,7 +2378,7 @@ class GlyphEditor extends HTMLElement {
   /**
    * Draws the brush preview under the pointer: gray for the pen, red for the
    * eraser.
-   * @param {Object} view - { ctx, size, cell, line, total, dpr }
+   * @param {Object} view - { ctx, size, cell, line, total, dpr, css }
    */
   drawHover({ ctx, size, cell }) {
     const previewTool = this.tool === 'pen' || this.tool === 'eraser'

@@ -175,3 +175,45 @@ export function shapeContains(shape, gx, gy) {
       return true
   }
 }
+
+/**
+ * Moves, scales and rotates a shape together with the group it belongs to.
+ * The group goes from the frame `from` ({ cx, cy, w, h }, not rotated) to the
+ * frame `to` ({ cx, cy, w, h, angle }): it is scaled around its center,
+ * rotated, then moved.
+ *
+ * Exact for shapes turned in steps of 90°. A non-uniform scale of a shape at
+ * another angle would shear it, which a shape cannot represent. Then the
+ * shape is stretched along its own axes by the lengths those axes get.
+ * @param {Object} shape
+ * @param {Object} from - { cx, cy, w, h }
+ * @param {Object} to - { cx, cy, w, h, angle }
+ * @returns {Object} the transformed shape
+ */
+export function transformShape(shape, from, to) {
+  const sx = to.w / from.w
+  const sy = to.h / from.h
+  const cos = Math.cos(to.angle)
+  const sin = Math.sin(to.angle)
+
+  const turn = (x, y) => ({ x: x * cos - y * sin, y: x * sin + y * cos })
+
+  const moved = turn((shape.cx - from.cx) * sx, (shape.cy - from.cy) * sy)
+
+  // The shape's own x and y axes after scaling and rotation
+  const ux = Math.cos(shape.angle)
+  const uy = Math.sin(shape.angle)
+  const ex = turn(ux * sx, uy * sy)
+  const ey = turn(-uy * sx, ux * sy)
+
+  const mirrored = sx * sy < 0 // A mirrored group mirrors the shape in one axis
+
+  return {
+    type: shape.type,
+    cx: to.cx + moved.x,
+    cy: to.cy + moved.y,
+    w: shape.w * Math.hypot(ex.x, ex.y),
+    h: (mirrored ? -1 : 1) * shape.h * Math.hypot(ey.x, ey.y),
+    angle: Math.atan2(ex.y, ex.x)
+  }
+}

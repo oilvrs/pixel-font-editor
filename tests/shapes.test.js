@@ -6,7 +6,8 @@ import {
   reverseContour,
   flattenContour,
   shapeBounds,
-  shapeContains
+  shapeContains,
+  transformShape
 } from '../src/core/shapes.js'
 
 const unit = (type, extra = {}) => ({ type, cx: 0.5, cy: 0.5, w: 1, h: 1, angle: 0, ...extra })
@@ -99,4 +100,48 @@ test('shapeContains follows rotation', () => {
 
   assert.equal(shapeContains(shape, 5.5, 4.2), true)
   assert.equal(shapeContains(shape, 4.2, 5.5), false)
+})
+
+test('transformShape: an unchanged frame leaves the shape as it is', () => {
+  const frame = { cx: 5, cy: 5, w: 4, h: 4 }
+  const shape = { type: 'quarter', cx: 6, cy: 4, w: 2, h: 1, angle: Math.PI / 2 }
+  const out = transformShape(shape, frame, { ...frame, angle: 0 })
+
+  assert.ok(near(out.cx, 6) && near(out.cy, 4) && near(out.w, 2) && near(out.h, 1) && near(out.angle, Math.PI / 2))
+})
+
+test('transformShape: moving the group moves the shape', () => {
+  const shape = { type: 'rect', cx: 4, cy: 4, w: 2, h: 2, angle: 0 }
+  const out = transformShape(shape, { cx: 5, cy: 5, w: 4, h: 4 }, { cx: 8, cy: 2, w: 4, h: 4, angle: 0 })
+
+  assert.ok(near(out.cx, 7) && near(out.cy, 1))
+})
+
+test('transformShape: scaling the group scales position and size', () => {
+  const shape = { type: 'rect', cx: 4, cy: 4, w: 2, h: 2, angle: 0 }
+  const out = transformShape(shape, { cx: 5, cy: 5, w: 4, h: 4 }, { cx: 5, cy: 5, w: 8, h: 8, angle: 0 })
+
+  assert.ok(near(out.cx, 3) && near(out.cy, 3) && near(out.w, 4) && near(out.h, 4))
+})
+
+test('transformShape: mirroring the group mirrors the shape', () => {
+  const shape = { type: 'quarter', cx: 5, cy: 5, w: 2, h: 2, angle: 0 } // Right angle at the top left
+  const out = transformShape(shape, { cx: 5, cy: 5, w: 2, h: 2 }, { cx: 5, cy: 5, w: -2, h: 2, angle: 0 })
+  const start = shapeContour(out).start
+
+  assert.ok(near(start.x, 6) && near(start.y, 4)) // Now at the top right
+})
+
+test('transformShape: rotating the group turns the shape around the group center', () => {
+  const shape = { type: 'rect', cx: 6, cy: 5, w: 2, h: 2, angle: 0 }
+  const out = transformShape(shape, { cx: 5, cy: 5, w: 4, h: 4 }, { cx: 5, cy: 5, w: 4, h: 4, angle: Math.PI / 2 })
+
+  assert.ok(near(out.cx, 5) && near(out.cy, 6) && near(out.angle, Math.PI / 2))
+})
+
+test('transformShape: a shape turned 90° is scaled along the right axis', () => {
+  const shape = { type: 'rect', cx: 5, cy: 5, w: 2, h: 1, angle: Math.PI / 2 }
+  const out = transformShape(shape, { cx: 5, cy: 5, w: 2, h: 2 }, { cx: 5, cy: 5, w: 4, h: 2, angle: 0 }) // Twice as wide
+
+  assert.ok(near(out.w, 2) && near(out.h, 2)) // Its height lies along x, so that is what doubles
 })
