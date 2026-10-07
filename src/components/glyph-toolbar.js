@@ -194,7 +194,7 @@ class GlyphToolbar extends HTMLElement {
     byId('brushUpBtn').addEventListener('click', () => this.emit('brush-step', { delta: 1 }))
     byId('clearBtn').addEventListener('click', () => this.emit('clear'))
     byId('guidesBtn').addEventListener('click', () => this.emit('guides-toggle'))
-        byId('zoomOutBtn').addEventListener('click', () => this.emit('zoom-step', { delta: -1 }))
+    byId('zoomOutBtn').addEventListener('click', () => this.emit('zoom-step', { delta: -1 }))
     byId('zoomInBtn').addEventListener('click', () => this.emit('zoom-step', { delta: 1 }))
     byId('zoomFitBtn').addEventListener('click', () => this.emit('zoom-fit'))
   }
@@ -229,6 +229,7 @@ class GlyphToolbar extends HTMLElement {
 
     byId('shapeRow').classList.toggle('hidden', tool !== 'shapes')
     byId('guidesBtn').classList.toggle('active', this.getAttribute('guides') === 'on')
+    byId('zoomValue').textContent = this.getAttribute('zoom') || '100%'
     byId('brushValue').textContent = `${this.getAttribute('brush') || 1} px`
   }
 }
