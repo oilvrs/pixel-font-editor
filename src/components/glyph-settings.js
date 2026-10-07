@@ -231,7 +231,7 @@ class GlyphSettings extends HTMLElement {
         shapes, then drag inside to move, drag a handle to resize, drag outside a corner to rotate · shapes (S):
         click or drag to place, same handles · shift: keep proportions or a square, snap rotation to 45° · R: rotate
         90° · delete: remove the selection · copy ⌘C, paste ⌘V · undo ⌘Z · brush: [ ] or − + · zoom: ⌘ or ctrl +
-        scroll, F fits the canvas · glyph: , . step · G glyph list · T text preview
+        scroll, F fits the canvas · glyph: , . step · G glyph list · T text preview . · spacing: below the text, in font units, up and down arrows step one pixel (shift: one unit) · click a letter in the text to select it
       </p>
     `
   }

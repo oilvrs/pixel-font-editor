@@ -9,7 +9,8 @@ import {
   cloneShapes,
   sanitizeShapes,
   serializeGlyph,
-  deserializeGlyph
+  deserializeGlyph,
+  sanitizeSpacing
 } from '../src/core/glyph.js'
 
 const rect = { type: 'rect', cx: 7, cy: 3, w: 2, h: 2, angle: 0 } // Cells 6 and 7
@@ -22,10 +23,11 @@ function gridWithPixel(x = 2, y = 1) {
 
 test('asGlyph accepts a grid, a glyph or nothing', () => {
   const grid = createGrid(16)
+  const automatic = { left: null, right: null }
 
   assert.equal(asGlyph(null), null)
-  assert.deepEqual(asGlyph(grid), { grid, shapes: [] })
-  assert.deepEqual(asGlyph({ grid, shapes: [rect], history: {} }), { grid, shapes: [rect] })
+  assert.deepEqual(asGlyph(grid), { grid, shapes: [], spacing: automatic })
+  assert.deepEqual(asGlyph({ grid, shapes: [rect], history: {} }), { grid, shapes: [rect], spacing: automatic })
 })
 
 test('glyphIsEmpty needs both no pixels and no shapes', () => {
@@ -84,4 +86,24 @@ test('shapes are not written when there are none, and old data loads without sha
 
   assert.ok(!('shapes' in data))
   assert.deepEqual(deserializeGlyph(data).shapes, [])
+})
+
+test('sanitizeSpacing keeps whole numbers within limits and drops anything else', () => {
+  assert.deepEqual(sanitizeSpacing({ left: 150.4, right: null }), { left: 150, right: null })
+  assert.deepEqual(sanitizeSpacing({ left: 'x', right: 99999 }), { left: null, right: 8192 })
+  assert.deepEqual(sanitizeSpacing(undefined), { left: null, right: null })
+})
+
+test('spacing survives serialization', () => {
+  const grid = gridWithPixel()
+  const data = JSON.parse(JSON.stringify(serializeGlyph({ grid, shapes: [], spacing: { left: 150, right: null } })))
+
+  assert.deepEqual(deserializeGlyph(data).spacing, { left: 150, right: null })
+})
+
+test('automatic spacing is not written, and old data loads as automatic', () => {
+  const data = serializeGlyph({ grid: gridWithPixel(), shapes: [], spacing: { left: null, right: null } })
+
+  assert.ok(!('spacing' in data))
+  assert.deepEqual(deserializeGlyph(data).spacing, { left: null, right: null })
 })

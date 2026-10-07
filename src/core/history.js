@@ -3,9 +3,9 @@
  * Pure logic, no DOM dependencies. One entry is one whole change.
  *
  * A snapshot is either a pixels array (Uint8Array) or an object
- * { pixels, shapes }. Entries are copies, never references.
+ * { pixels, shapes, spacing }. Entries are copies, never references.
  *
- * @version 0.2.0
+ * @version 0.3.0
  */
 
 /**
@@ -15,7 +15,11 @@
  */
 function copyState(state) {
   if (state && state.pixels) {
-    return { pixels: state.pixels.slice(), shapes: (state.shapes || []).map((shape) => ({ ...shape })) }
+    return {
+      pixels: state.pixels.slice(),
+      shapes: (state.shapes || []).map((shape) => ({ ...shape })),
+      spacing: state.spacing ? { ...state.spacing } : state.spacing
+    }
   }
 
   return state.slice()

@@ -147,3 +147,15 @@ test('where a shape sits horizontally does not matter', () => {
 
   assert.equal(buildSvg(createGrid(16), { margin: 1, shapes: [at(3)] }), buildSvg(createGrid(16), { margin: 1, shapes: [at(9)] }))
 })
+
+test('spacing of its own sets the left edge and the advance width', () => {
+  const svg = buildSvg(gridFrom(['', '', '', '..#']), { margin: 1, spacing: { left: 300, right: 100 } })
+
+  assert.equal(viewBoxOf(svg), '0 -1792 528 2048') // 300 + 128 + 100
+  assert.deepEqual(numbersOf(svg), [-1408, -1280, 300, 428])
+})
+
+test('one side can be automatic while the other is set', () => {
+  const svg = buildSvg(gridFrom(['..#']), { margin: 1, spacing: { left: null, right: 0 } })
+  assert.equal(viewBoxOf(svg), '0 -1792 256 2048') // 128 automatic + 128 ink + 0
+})

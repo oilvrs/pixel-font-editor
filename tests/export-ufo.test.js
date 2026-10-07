@@ -136,3 +136,16 @@ test('a triangle shape is a closed contour of lines', () => {
   assert.equal(contours[0].length, 3)
   assert.ok(area(contours[0]) > 0) // Counter-clockwise in y-up coordinates
 })
+
+test('a glyph with spacing of its own gets that advance width and position', () => {
+  const ufo = buildUfo([{ char: 'a', grid: pixel, spacing: { left: 300, right: 100 } }], {
+    familyName: 'Test',
+    size: 16,
+    margin: 1
+  })
+  const glif = files(ufo).get('Test.ufo/glyphs/a.glif')
+  const xs = contoursOf(glif)[0].map((p) => p.x).sort((a, b) => a - b)
+
+  assert.ok(glif.includes('<advance width="528"/>'))
+  assert.deepEqual([xs[0], xs[xs.length - 1]], [300, 428])
+})

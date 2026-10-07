@@ -11,21 +11,23 @@
  * other merge.
  *
  * Horizontal position: where the letter is drawn in the grid does not
- * matter. The export moves everything so its left edge is `margin` pixels
- * from x = 0, and the viewBox width (the advance width) is the width of
- * pixels and shapes plus `margin` on both sides.
+ * matter. The export moves everything so its left edge is at the left
+ * sidebearing, and the viewBox width (the advance width) is the left
+ * sidebearing, the width of pixels and shapes, and the right sidebearing.
+ * A sidebearing that has not been set is the automatic `margin`.
  *
  * origin 'baseline': (0, 0) is on the baseline, y runs downwards, so
  * everything above the baseline has negative y. The viewBox starts at the
  * ascender.
  * origin 'top': (0, 0) is the top left corner of the em box.
  *
- * @version 0.3.0
+ * @version 0.4.0
  */
 
 import { traceGrid } from './trace.js'
 import { getMetrics, unitsPerPixel } from '../metrics.js'
-import { glyphBounds, inkBounds } from './glyph.js'
+import { inkBounds } from './glyph.js'
+import { effectiveSpacing } from './spacing.js'
 import { shapeContour, reverseContour } from './shapes.js'
 
 export { inkBounds }
@@ -76,26 +78,26 @@ function shapePath(shape, toX, toY) {
  * Builds the SVG file content for a glyph.
  * @param {Object} grid - { size, pixels }
  * @param {Object} options
- * @param {number} options.margin - side margin in pixels, on both sides of the glyph
+ * @param {number} options.margin - automatic side margin in pixels
  * @param {string} options.origin - 'baseline' (default) or 'top'
  * @param {Object[]} options.shapes - shapes on top of the pixels
+ * @param {Object|null} options.spacing - { left, right } sidebearings in font units, null for automatic
  * @returns {string}
  */
-export function buildSvg(grid, { margin = 0, origin = 'baseline', shapes = [] } = {}) {
+export function buildSvg(grid, { margin = 0, origin = 'baseline', shapes = [], spacing = null } = {}) {
   const unit = unitsPerPixel(grid.size)
   const offsetRows = origin === 'baseline' ? getMetrics(grid.size).baseline : 0
 
-  const bounds = glyphBounds({ grid, shapes })
-  const inkWidth = bounds ? bounds.right - bounds.left : 0
-  const shift = bounds ? margin - bounds.left : 0 // Puts the left edge of the glyph `margin` pixels from x = 0
+  const info = effectiveSpacing({ grid, shapes, spacing }, grid.size, margin)
+  const offsetX = info ? info.left - info.bounds.left * unit : 0 // Puts the left edge of the glyph at the left sidebearing
 
-  const toX = (px) => Math.round((px + shift) * unit)
+  const toX = (px) => Math.round(px * unit + offsetX)
   const toY = (py) => Math.round((py - offsetRows) * unit)
 
   const parts = traceGrid(grid).map((contour) => contourPath(contour.points.slice().reverse(), toX, toY))
   for (const shape of shapes) parts.push(shapePath(shape, toX, toY))
 
-  const width = Math.round((inkWidth + margin * 2) * unit)
+  const width = info ? info.width : Math.round(margin * 2 * unit)
   const height = grid.size * unit
   const top = -offsetRows * unit
 

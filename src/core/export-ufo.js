@@ -5,6 +5,9 @@
  * A UFO is a folder of XML files. This module returns the files, and the
  * caller packs them in a ZIP, since a browser cannot write a folder.
  * Shapes are written as curves (cubic Bézier), with smooth points for ellipses.
+ * Horizontal position follows the spacing of the glyph: the left sidebearing, 
+ * the width of pixels and shapes, and the right sidebearing. Sides without a value
+ * of their own use the margin.
  *
  * Glyph rules are the same as the SVG export: where a letter is drawn
  * horizontally does not matter, the ink is moved so its left edge is
@@ -17,7 +20,7 @@
  */
 
 import { traceGrid } from './trace.js'
-import { glyphBounds } from './glyph.js'
+import { effectiveSpacing } from './spacing.js'
 import { shapeContour, reverseContour } from './shapes.js'
 import { glyphName, exportFileName } from './glyph-names.js'
 import { spaceWidth } from './layout.js'
@@ -141,7 +144,7 @@ function shapePoints(shape, toX, toY) {
 
 /**
  * Builds the files of a UFO.
- * @param {Object[]} glyphs - [{ char, grid, shapes }], only glyphs that have a drawing
+ * @param {Object[]} glyphs - [{ char, grid, shapes, spacing }]
  * @param {Object} options
  * @param {string} options.familyName
  * @param {number} options.size - grid size
@@ -155,12 +158,11 @@ export function buildUfo(glyphs, { familyName, size, margin }) {
   const units = (row) => (baseline - row) * unit // A row boundary as a height above the baseline
   const folderName = `${safeFileName(familyName)}.ufo`
 
-  const entries = glyphs.map(({ char, grid, shapes = [] }) => {
-    const bounds = glyphBounds({ grid, shapes })
-    const shift = margin - bounds.left
-    const advance = Math.round((bounds.right - bounds.left + margin * 2) * unit)
+  const entries = glyphs.map(({ char, grid, shapes = [], spacing = null }) => {
+    const info = effectiveSpacing({ grid, shapes, spacing }, size, margin)
+    const offsetX = info.left - info.bounds.left * unit // Puts the left edge of the glyph at the left sidebearing
 
-    const toX = (px) => Math.round((px + shift) * unit)
+    const toX = (px) => Math.round(px * unit + offsetX)
     const toY = (py) => Math.round(units(py))
 
     const contours = traceGrid(grid).map((contour) =>
@@ -173,11 +175,7 @@ export function buildUfo(glyphs, { familyName, size, margin }) {
     for (const shape of shapes) contours.push(shapePoints(shape, toX, toY))
 
     const name = glyphName(char)
-    return {
-      name,
-      file: exportFileName(name, 'glif'),
-      text: glif({ name, advance, char, contours }),
-    }
+    return { name, file: exportFileName(name, 'glif'), text: glif({ name, advance: info.width, char, contours }) }
   })
 
   entries.unshift({

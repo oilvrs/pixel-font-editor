@@ -1,14 +1,53 @@
 /**
- * A glyph is its pixels and its shapes: { grid, shapes }.
+ * A glyph is its pixels, its shapes and its spacing: { grid, shapes, spacing }.
  * Pure logic, no DOM dependencies.
  *
- * @version 0.1.0
+ * Spacing is { left, right }: the left and right sidebearing in font units.
+ * A side that is null is automatic and follows the side margin setting.
+ *
+ * @version 0.2.0
  */
 
 import { isEmpty, serializeGrid, deserializeGrid } from './grid.js'
 import { SHAPE_TYPES, shapeBounds } from './shapes.js'
 
 export const MAX_SHAPES = 500
+
+const MIN_SPACING = -4096
+const MAX_SPACING = 8192
+
+/**
+ * Spacing with both sides automatic.
+ * @returns {Object} { left: null, right: null }
+ */
+export function noSpacing() {
+  return { left: null, right: null }
+}
+
+/**
+ * Copies spacing. Missing values become automatic.
+ * @param {Object|null} spacing
+ * @returns {Object} { left, right }
+ */
+export function cloneSpacing(spacing) {
+  return {
+    left: spacing && spacing.left !== undefined ? spacing.left : null,
+    right: spacing && spacing.right !== undefined ? spacing.right : null
+  }
+}
+
+/**
+ * Checks spacing from saved data. Values become whole numbers within
+ * limits, and anything that is not a number becomes automatic.
+ * @param {*} value
+ * @returns {Object} { left, right }
+ */
+export function sanitizeSpacing(value) {
+  if (!value || typeof value !== 'object') return noSpacing()
+
+  const clean = (side) => (Number.isFinite(side) ? Math.min(Math.max(Math.round(side), MIN_SPACING), MAX_SPACING) : null)
+  return { left: clean(value.left), right: clean(value.right) }
+}
 
 /**
  * The rectangle of cells that contain pixels.
@@ -38,15 +77,19 @@ export function inkBounds(grid) {
 /**
  * Accepts either a glyph or a plain grid and returns a glyph.
  * @param {Object|null} value
- * @returns {Object|null} { grid, shapes }
+ * @returns {Object|null} { grid, shapes, spacing }
  */
 export function asGlyph(value) {
   if (!value) return null
-  return value.grid ? { grid: value.grid, shapes: value.shapes || [] } : { grid: value, shapes: [] }
+
+  return value.grid
+    ? { grid: value.grid, shapes: value.shapes || [], spacing: cloneSpacing(value.spacing) }
+    : { grid: value, shapes: [], spacing: noSpacing() }
 }
 
 /**
- * Checks if a glyph has neither pixels nor shapes.
+ * Checks if a glyph has neither pixels nor shapes. Spacing alone does not
+ * make a glyph non-empty, since there is nothing to space.
  * @param {Object} glyph - { grid, shapes }
  * @returns {boolean}
  */
@@ -105,23 +148,32 @@ export function sanitizeShapes(list) {
 }
 
 /**
- * Makes a JSON-friendly object of a glyph. Shapes are left out when there are none.
- * @param {Object} glyph - { grid, shapes }
- * @returns {Object} { size, bits, shapes? }
+ * Makes a JSON-friendly object of a glyph. Shapes and spacing are left out
+ * when there are none.
+ * @param {Object} glyph - { grid, shapes, spacing }
+ * @returns {Object} { size, bits, shapes?, spacing? }
  */
 export function serializeGlyph(glyph) {
   const data = serializeGrid(glyph.grid)
+  const spacing = cloneSpacing(glyph.spacing)
+
   if (glyph.shapes && glyph.shapes.length > 0) data.shapes = cloneShapes(glyph.shapes)
+  if (spacing.left !== null || spacing.right !== null) data.spacing = spacing
+
   return data
 }
 
 /**
- * Restores a glyph from the object made by serializeGlyph. Data without
- * shapes (saved by an older version) gives a glyph without shapes.
+ * Restores a glyph from the object made by serializeGlyph. Data from an
+ * older version, without shapes or spacing, gives a glyph without them.
  * @param {Object} data
- * @returns {Object} { grid, shapes }
+ * @returns {Object} { grid, shapes, spacing }
  * @throws {Error} if the pixel data is damaged
  */
 export function deserializeGlyph(data) {
-  return { grid: deserializeGrid(data), shapes: sanitizeShapes(data.shapes) }
+  return {
+    grid: deserializeGrid(data),
+    shapes: sanitizeShapes(data.shapes),
+    spacing: sanitizeSpacing(data.spacing)
+  }
 }

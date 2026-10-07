@@ -57,3 +57,13 @@ test('damaged glyphs, wrong sizes and unknown characters are skipped, and the ma
   assert.deepEqual(parsed.sets[0].glyphs.map((g) => g.char), ['c'])
   assert.equal(parsed.sets[0].name, null)
 })
+
+test('spacing is kept in a backup', () => {
+  const grid = createGrid(16)
+  setPixel(grid, 1, 1, 1)
+
+  const sets = new Map([[16, { margin: 1, name: 'Test', glyphs: new Map([['a', { grid, spacing: { left: 150, right: null } }]]) }]])
+  const parsed = parseBackup(JSON.stringify(createBackup(sets)))
+
+  assert.deepEqual(parsed.sets[0].glyphs[0].spacing, { left: 150, right: null })
+})

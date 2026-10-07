@@ -1,18 +1,19 @@
 /**
  * Text preview: type text and see it set in the glyphs you have drawn,
- * with the same spacing the SVG export gives.
+ * with the spacing the exports give. Click a letter to select its glyph.
  *
  * The preview gets its data from a `source` function, set by the editor:
- *   () => ({ size, margin, getGlyph })
+ *   () => ({ size, margin, current, getGlyph })
  *
- * Methods: refresh(), focusText(), blurText()
+ * Methods: refresh(), getText(), setText(text), focusText(), blurText()
+ * Events: glyph-pick { char }
  *
- * @version 0.1.0
+ * @version 0.3.0
  */
 
 import { layoutText } from '../core/layout.js'
-import { loadText, saveText } from '../utils/storage.js'
 import { paintShapes } from '../utils/paint-shapes.js'
+import { loadText, saveText } from '../utils/storage.js'
 
 const DEFAULT_TEXT = 'Hamburgefonstiv'
 const TARGET_HEIGHT = 96 // Wanted height of one line, in CSS px, when choosing the default zoom
@@ -22,9 +23,12 @@ class GlyphPreview extends HTMLElement {
   constructor() {
     super()
     this.attachShadow({ mode: 'open' })
-    this.source = () => ({ size: 32, margin: 2, getGlyph: () => null })
+    this.source = () => ({ size: 32, margin: 2, current: '', getGlyph: () => null })
     this.scale = 1 // Image pixels per grid cell, in CSS px
     this.lastSize = null
+    this.layout = null // The last layout, used to find the letter under a click
+    this.cell = 1 // Device px per grid cell in the last drawing
+    this.gridSize = 32 // Grid size in the last drawing
   }
 
   /**
@@ -117,12 +121,13 @@ class GlyphPreview extends HTMLElement {
 
         canvas {
           display: block;
+          cursor: pointer;
         }
       </style>
 
       <div class="head">
         <span class="title">text</span>
-        <span class="hint">T to type · esc to leave · gray boxes are glyphs without a drawing</span>
+        <span class="hint">T to type · esc to leave · click a letter to select it · gray boxes are glyphs without a drawing</span>
         <button id="zoomOutBtn" title="smaller">−</button>
         <span class="value" id="zoomValue"></span>
         <button id="zoomInBtn" title="larger">+</button>
@@ -136,7 +141,7 @@ class GlyphPreview extends HTMLElement {
   }
 
   /**
-   * Sets up the text field and the zoom buttons.
+   * Sets up the text field, the zoom buttons and clicks on the letters.
    */
   setUpEventListeners() {
     this.textarea.addEventListener('input', () => {
@@ -150,6 +155,28 @@ class GlyphPreview extends HTMLElement {
 
     this.shadowRoot.getElementById('zoomOutBtn').addEventListener('click', () => this.zoom(-1))
     this.shadowRoot.getElementById('zoomInBtn').addEventListener('click', () => this.zoom(1))
+    this.shadowRoot.getElementById('canvas').addEventListener('pointerdown', (e) => this.onPointerDown(e))
+  }
+
+  /**
+   * Finds the letter under a click and tells the editor to select its glyph.
+   * @param {PointerEvent} e
+   */
+  onPointerDown(e) {
+    if (!this.layout) return
+
+    const canvas = e.currentTarget
+    const rect = canvas.getBoundingClientRect()
+    const deviceScale = canvas.width / rect.width
+
+    const x = ((e.clientX - rect.left) * deviceScale) / this.cell
+    const y = ((e.clientY - rect.top) * deviceScale) / this.cell
+
+    const hit = this.layout.items.find(
+      (item) => x >= item.x && x < item.x + item.advance && y >= item.y && y < item.y + this.gridSize
+    )
+
+    if (hit) this.dispatchEvent(new CustomEvent('glyph-pick', { detail: { char: hit.char } }))
   }
 
   /**
@@ -196,13 +223,38 @@ class GlyphPreview extends HTMLElement {
   }
 
   /**
+   * Draws the sidebearings of a letter: its advance box lightly, and the
+   * sidebearings darker, with a line at each end of the advance.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {Object} item - a layout item
+   * @param {Object} m - { cell, line, top, height, boxLeft, boxRight }
+   */
+  paintMetrics(ctx, item, { cell, line, top, height, boxLeft, boxRight }) {
+    const inkLeft = Math.round((item.x + item.lsb) * cell)
+    const inkRight = Math.round((item.x + item.advance - item.rsb) * cell)
+
+    ctx.fillStyle = 'rgba(0, 0, 255, 0.06)'
+    ctx.fillRect(boxLeft, top, boxRight - boxLeft, height)
+
+    ctx.fillStyle = 'rgba(0, 0, 255, 0.14)'
+    ctx.fillRect(boxLeft, top, Math.max(0, inkLeft - boxLeft), height)
+    ctx.fillRect(inkRight, top, Math.max(0, boxRight - inkRight), height)
+
+    ctx.fillStyle = 'rgba(0, 0, 255, 0.6)'
+    ctx.fillRect(boxLeft, top, line, height)
+    ctx.fillRect(boxRight - line, top, line, height)
+  }
+
+  /**
    * Lays out the text and draws it. The zoom is reset to a sensible
-   * default whenever the grid size changes.
+   * default whenever the grid size changes. Positions are rounded to whole
+   * device pixels, so edges stay sharp even when a spacing is not a whole
+   * number of pixels.
    */
   refresh() {
     if (!this.textarea) return
 
-    const { size, margin, getGlyph } = this.source()
+    const { size, margin, current, getGlyph } = this.source()
 
     if (size !== this.lastSize) {
       this.scale = Math.max(1, Math.floor(TARGET_HEIGHT / size))
@@ -214,6 +266,11 @@ class GlyphPreview extends HTMLElement {
     const layout = layoutText(this.textarea.value, getGlyph, { size, margin })
     const dpr = window.devicePixelRatio || 1
     const cell = Math.max(1, Math.round(this.scale * dpr))
+    const line = Math.max(1, Math.round(dpr))
+
+    this.layout = layout
+    this.cell = cell
+    this.gridSize = size
 
     const canvas = this.shadowRoot.getElementById('canvas')
     const width = Math.min(Math.max(1, Math.ceil(layout.width * cell)), MAX_CANVAS)
@@ -228,19 +285,22 @@ class GlyphPreview extends HTMLElement {
     ctx.clearRect(0, 0, width, height)
 
     for (const item of layout.items) {
-      const top = item.y * cell
+      const top = Math.round(item.y * cell)
+      const boxLeft = Math.round(item.x * cell)
+      const boxRight = Math.round((item.x + item.advance) * cell)
 
       if (item.missing) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.08)'
-        ctx.fillRect(item.x * cell, top, item.advance * cell, size * cell)
+        ctx.fillStyle = item.char === current ? 'rgba(0, 0, 255, 0.14)' : 'rgba(0, 0, 0, 0.08)'
+        ctx.fillRect(boxLeft, top, boxRight - boxLeft, size * cell)
         continue
       }
 
-      const left = (item.x + item.inkOffset) * cell
-      const { pixels } = item.grid
+      if (item.char === current) {
+        this.paintMetrics(ctx, item, { cell, line, top, height: size * cell, boxLeft, boxRight })
+      }
 
-      ctx.fillStyle = '#000000' // Felplacerad?
-      paintShapes(ctx, item.shapes, { scale: cell, x: left, y: top })
+      const left = Math.round((item.x + item.inkOffset) * cell)
+      const { pixels } = item.grid
 
       ctx.fillStyle = '#000000'
       for (let y = 0; y < size; y++) {
@@ -248,6 +308,8 @@ class GlyphPreview extends HTMLElement {
           if (pixels[y * size + x]) ctx.fillRect(left + x * cell, top + y * cell, cell, cell)
         }
       }
+
+      paintShapes(ctx, item.shapes, { scale: cell, x: left, y: top })
     }
   }
 }

@@ -68,3 +68,13 @@ test('undo and redo work with snapshots', () => {
   assert.deepEqual(redone.pixels, after.pixels)
   assert.equal(redone.shapes[0].cx, 1)
 })
+
+test('snapshots keep spacing and copy it', () => {
+  const history = createHistory()
+  const snapshot = { pixels: new Uint8Array([0]), shapes: [], spacing: { left: 150, right: null } }
+
+  pushState(history, snapshot)
+  snapshot.spacing.left = 999
+
+  assert.deepEqual(history.past[0].spacing, { left: 150, right: null })
+})
