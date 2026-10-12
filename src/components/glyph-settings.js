@@ -14,7 +14,7 @@
  * - export { format: 'svg' | 'png' }
  * - png-bg-toggle
  * - name-change { name: string }
- * - export-all { format: 'ufo' | 'svg' }
+ * - export-all { format: 'ufo' | 'svg' | 'ttf' | 'woff' | 'web' }
  * - backup
  * - restore
  *
@@ -223,6 +223,9 @@ class GlyphSettings extends HTMLElement {
         <div class="controls">
           <button id="backupBtn" title="save all drawings as a backup file">backup</button>
           <button id="restoreBtn" title="replace everything with a backup file">restore</button>
+           <button id="exportTtfBtn" title="TrueType font file (.ttf)">save ttf</button>
+          <button id="exportWoffBtn" title="web font file (.woff)">save woff</button>
+          <button id="exportWebBtn" title="woff, ttf, CSS and a test page in one zip">web font</button>
         </div>
       </section>
 
@@ -265,6 +268,11 @@ class GlyphSettings extends HTMLElement {
     )
     byId('backupBtn').addEventListener('click', () => this.emit('backup'))
     byId('restoreBtn').addEventListener('click', () => this.emit('restore'))
+    byId('exportTtfBtn').addEventListener('click', () => this.emit('export-all', { format: 'ttf' }))
+    byId('exportWoffBtn').addEventListener('click', () =>
+      this.emit('export-all', { format: 'woff' })
+    )
+    byId('exportWebBtn').addEventListener('click', () => this.emit('export-all', { format: 'web' }))
 
     const input = byId('nameInput')
     input.addEventListener('focus', () => input.select())

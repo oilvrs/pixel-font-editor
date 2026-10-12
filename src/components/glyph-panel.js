@@ -63,6 +63,7 @@ class GlyphPanel extends HTMLElement {
 
         .title {
           color:red;
+          font-weight:bold;
         }
 
         .head {

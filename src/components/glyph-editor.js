@@ -52,6 +52,10 @@ import { effectiveSpacing } from '../core/spacing.js'
 import { buildSvg } from '../core/export-svg.js'
 import { buildUfo, safeFileName } from '../core/export-ufo.js'
 import { createZip } from '../core/zip.js'
+import { buildFont } from '../core/export-ttf.js'
+import { buildWoff } from '../core/woff.js'
+import { fontBaseName, buildCss, buildSpecimen } from '../core/web-font.js'
+import { deflate } from '../utils/compress.js'
 import { createBackup, parseBackup } from '../core/backup.js'
 import { glyphName, exportFileName } from '../core/glyph-names.js'
 import { ALL_GLYPHS } from '../core/glyph-set.js'
@@ -2091,11 +2095,12 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Saves every drawn glyph of the active grid size in one ZIP: a UFO font
-   * that Glyphs opens, or one SVG per glyph.
-   * @param {string} format - 'ufo' or 'svg'
+   * Saves every drawn glyph of the active grid size: a UFO font in a ZIP
+   * that Glyphs opens, one SVG per glyph in a ZIP, a TrueType font, a WOFF
+   * web font, or a web package.
+   * @param {string} format - 'ufo', 'svg', 'ttf', 'woff' or 'web'
    */
-  exportAll(format) {
+  async exportAll(format) {
     this.commitFloating()
 
     const { margin, name, glyphs } = this.set
@@ -2110,6 +2115,11 @@ class GlyphEditor extends HTMLElement {
 
     if (drawn.length === 0) {
       this.flash('nothing to export: no glyph has a drawing yet')
+      return
+    }
+
+    if (format === 'ttf' || format === 'woff' || format === 'web') {
+      await this.exportFont(format, drawn)
       return
     }
 
@@ -2132,6 +2142,58 @@ class GlyphEditor extends HTMLElement {
     this.flash(
       `saved ${fileName} with ${drawn.length} glyphs${format === 'ufo' ? ' · unzip it, then open the .ufo in Glyphs' : ''}`
     )
+  }
+
+  /**
+   * Saves the font as a TrueType file, a WOFF file or a web package (WOFF,
+   * TrueType, CSS and a test page in a ZIP).
+   * @param {string} format - 'ttf', 'woff' or 'web'
+   * @param {Object[]} drawn - [{ char, grid, shapes, spacing }]
+   */
+  async exportFont(format, drawn) {
+    const { margin, name } = this.set
+    const baseName = fontBaseName(name)
+
+    try {
+      const font = buildFont(drawn, { familyName: name, size: this.size, margin })
+
+      if (format === 'ttf') {
+        downloadBlob(new Blob([font.ttf], { type: 'font/ttf' }), `${baseName}.ttf`)
+        this.flash(`saved ${baseName}.ttf with ${drawn.length} glyphs`)
+        return
+      }
+
+      const woff = await buildWoff(font.tables, deflate)
+
+      if (format === 'woff') {
+        downloadBlob(new Blob([woff], { type: 'font/woff' }), `${baseName}.woff`)
+        this.flash(`saved ${baseName}.woff with ${drawn.length} glyphs`)
+        return
+      }
+
+      const files = [
+        { name: `${baseName}.woff`, data: woff },
+        { name: `${baseName}.ttf`, data: font.ttf },
+        {
+          name: `${baseName}.css`,
+          data: buildCss({ familyName: name, baseName, size: this.size }),
+        },
+        {
+          name: 'index.html',
+          data: buildSpecimen({
+            familyName: name,
+            baseName,
+            size: this.size,
+            text: this.preview.getText(),
+          }),
+        },
+      ]
+
+      downloadBlob(new Blob([createZip(files)], { type: 'application/zip' }), `${baseName}-web.zip`)
+      this.flash(`saved ${baseName}-web.zip: woff, ttf, css and a test page`)
+    } catch (error) {
+      this.flash(`could not make the font: ${error.message}`)
+    }
   }
 
   /**
