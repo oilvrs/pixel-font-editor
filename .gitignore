@@ -5,3 +5,4 @@ glyphs/
 .env
 .env.*
 *.pem
+!.env.example

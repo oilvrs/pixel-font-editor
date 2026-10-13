@@ -1,0 +1,47 @@
+{
+  "name": "glyph-editor-backend",
+  "version": "0.1.0",
+  "description": "Glyph editor backend - authentication and saved font projects.",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon --inspect --env-file=.env src/server.js",
+    "lint": "npx eslint ./src || exit 0",
+    "lint:fix": "npx eslint ./src --fix || exit 0",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --runInBand"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "transform": {},
+    "setupFiles": [
+      "./tests/setup-env.js"
+    ],
+    "testTimeout": 60000
+  },
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "@lnu/json-js-cycle": "^2.0.5",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-http-context": "^1.2.4",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "http-errors": "^2.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^8.0.4",
+    "morgan": "^1.10.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "mongodb-memory-server": "^11.3.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^7.0.0"
+  }
+}
