@@ -5,7 +5,9 @@
 
 import express from 'express'
 import { router as authRouter } from './authRouter.js'
+import { router as projectRouter } from './projectRouter.js'
 
 export const router = express.Router()
 
 router.use('/auth', authRouter)
+router.use('/projects', projectRouter)

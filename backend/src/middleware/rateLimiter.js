@@ -22,7 +22,8 @@ export function createGeneralLimiter (max = 100) {
     /**
      * Health checks (uptime pings) are not counted.
     */
-    skip: (req) => req.path === '/health',
+        // Health checks and the project routes (which have their own limiter) are not counted.
+    skip: (req) => req.path === '/health' || req.path.startsWith('/api/v1/projects'),
     message: {
       status_code: 429,
       message: 'Too many requests, please try again later.'
@@ -45,6 +46,26 @@ export function createAuthLimiter (max = 10) {
     message: {
       status_code: 429,
       message: 'Too many authentication attempts, please try again later.'
+    }
+  })
+}
+
+/**
+ * Creates the limiter for the project routes. Higher than the general limit,
+ * because autosave sends a request every few seconds while the user draws.
+ *
+ * @param {number} [max] - Requests per 15 minutes and IP address.
+ * @returns {Function} Express middleware.
+ */
+export function createProjectLimiter (max = 1000) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes.
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      status_code: 429,
+      message: 'Too many requests, please try again later.'
     }
   })
 }

@@ -4,16 +4,20 @@
  * import it. See server.js for startup.
  */
 
-import httpContext from 'express-http-context'
-import '@lnu/json-js-cycle'
-import cors from 'cors'
-import express from 'express'
-import helmet from 'helmet'
-import { randomUUID } from 'node:crypto'
-import { morganLogger } from './config/morgan.js'
-import { errorHandler } from './config/errorhandler.js'
-import { createAuthLimiter, createGeneralLimiter } from './middleware/rateLimiter.js'
-import { router } from './routes/router.js'
+import httpContext from "express-http-context";
+import "@lnu/json-js-cycle";
+import cors from "cors";
+import express from "express";
+import helmet from "helmet";
+import { randomUUID } from "node:crypto";
+import { morganLogger } from "./config/morgan.js";
+import { errorHandler } from "./config/errorhandler.js";
+import { router } from "./routes/router.js";
+import {
+  createAuthLimiter,
+  createGeneralLimiter,
+  createProjectLimiter,
+} from "./middleware/rateLimiter.js";
 
 /**
  * Creates the Express application.
@@ -21,55 +25,63 @@ import { router } from './routes/router.js'
  * @param {object} [options] - Options, mainly for tests.
  * @param {number} [options.generalLimit] - Requests per 15 minutes and IP, all routes.
  * @param {number} [options.authLimit] - Requests per 15 minutes and IP, auth routes.
+ * @param {number} [options.projectLimit] - Requests per 15 minutes and IP, project routes.
  * @returns {import('express').Express} The application.
  */
-export function createApp ({ generalLimit = 100, authLimit = 10 } = {}) {
-  const { NODE_ENV, CORS_ORIGIN } = process.env
+export function createApp({
+  generalLimit = 100,
+  authLimit = 10,
+  projectLimit = 1000,
+} = {}) {
+  const { NODE_ENV, CORS_ORIGIN } = process.env;
 
-  const app = express()
+  const app = express();
 
   // Render runs behind one proxy. Without this all clients share one IP address,
   // and therefore one rate limit.
-  if (NODE_ENV === 'production') {
-    app.set('trust proxy', 1)
+  if (NODE_ENV === "production") {
+    app.set("trust proxy", 1);
   }
 
   // Set various HTTP headers to make the application more secure.
-  app.use(helmet())
+  app.use(helmet());
 
   // Limit requests to prevent overwhelming.
-  app.use(createGeneralLimiter(generalLimit))
+  app.use(createGeneralLimiter(generalLimit));
 
   // Enable Cross Origin Resource Sharing (CORS).
-  app.use(cors({ origin: CORS_ORIGIN }))
+  app.use(cors({ origin: CORS_ORIGIN }));
 
   // Parse requests of the content type application/json.
   // The limit is raised for saving many glyphs at once (step 2).
-  app.use(express.json({ limit: '2mb' }))
+  app.use(express.json({ limit: "2mb" }));
 
   // Add the request-scoped context - placed before any middleware that needs access to context.
-  app.use(httpContext.middleware)
+  app.use(httpContext.middleware);
 
   // Use a morgan logger.
-  app.use(morganLogger)
+  app.use(morganLogger);
 
   // Middleware to be executed before the routes.
   app.use((req, res, next) => {
     // Add a request UUID to each request and store information about
     // each request in the request-scoped context.
-    req.requestUuid = randomUUID()
-    httpContext.set('request', req)
-    next()
-  })
+    req.requestUuid = randomUUID();
+    httpContext.set("request", req);
+    next();
+  });
 
   // Strict limit on register and login.
-  app.use('/api/v1/auth', createAuthLimiter(authLimit))
+  app.use("/api/v1/auth", createAuthLimiter(authLimit));
+
+  // Higher limit for the project routes, since autosave sends frequent requests.
+  app.use("/api/v1/projects", createProjectLimiter(projectLimit));
 
   // Register routes.
-  app.use('/', router)
+  app.use("/", router);
 
   // Error handler.
-  app.use(errorHandler({ environment: NODE_ENV }))
+  app.use(errorHandler({ environment: NODE_ENV }));
 
-  return app
+  return app;
 }
