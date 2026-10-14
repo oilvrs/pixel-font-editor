@@ -4,12 +4,14 @@
  */
 
 import express from 'express'
+import { GlyphController } from '../../../controllers/api/GlyphController.js'
 import { ProjectController } from '../../../controllers/api/ProjectController.js'
 import { authenticateJWT } from '../../../middleware/auth.js'
 
 export const router = express.Router()
 
 const controller = new ProjectController()
+const glyphController = new GlyphController()
 
 // All routes require a valid JWT. Must come before router.param so that
 // req.user is available when the project is loaded.
@@ -32,3 +34,6 @@ router.patch('/:id', (req, res, next) => controller.update(req, res, next))
 
 // DELETE /api/v1/projects/:id - delete a project and its glyphs.
 router.delete('/:id', (req, res, next) => controller.delete(req, res, next))
+
+// PUT /api/v1/projects/:id/glyphs - save and delete glyphs in one batch.
+router.put('/:id/glyphs', (req, res, next) => glyphController.save(req, res, next))
