@@ -56,6 +56,7 @@ class GlyphProjects extends HTMLElement {
       <style>
         :host { display: block; max-width: 40rem; margin: 6vh auto 0; padding: 0 1rem; font: inherit; color: inherit; }
         header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; }
+        .title {color:red;}
         h1 { font-size: 1.5em; font-weight: normal; margin: 0; }
         form { display: flex; flex-wrap: wrap; gap: 0.5rem; }
         input, select { font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; padding: 0.4rem; }
@@ -73,7 +74,8 @@ class GlyphProjects extends HTMLElement {
         li .meta { flex: 1 1 12rem; }
       </style>
       <header>
-        <h1>your projects</h1>
+        <h1 class="title">wood___house font editor<h1>
+        <h1>projects</h1>
         <div><span class="user"></span> <button type="button" class="logout">log out</button></div>
       </header>
       <form class="create">

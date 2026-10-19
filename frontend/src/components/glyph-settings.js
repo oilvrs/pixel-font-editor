@@ -3,10 +3,9 @@
  * Stateless: everything shown is set through attributes, and user actions
  * are sent as events.
  *
- * Attributes: size, glyph, glyph-name, panel, copy, margin, png-bg, font-name
+ * Attributes: size, glyph, glyph-name, panel, copy, margin, png-bg, font-name, save-status, save-state
  *
  * Events:
- * - size-change { size: number }
  * - glyph-step { delta: 1 | -1 }
  * - panel-toggle
  * - copy-start
@@ -23,7 +22,18 @@
 
 class GlyphSettings extends HTMLElement {
   static get observedAttributes() {
-    return ['size', 'glyph', 'glyph-name', 'panel', 'copy', 'margin', 'png-bg', 'font-name']
+    return [
+      'size',
+      'glyph',
+      'glyph-name',
+      'panel',
+      'copy',
+      'margin',
+      'png-bg',
+      'font-name',
+      'save-status',
+      'save-state',
+    ]
   }
 
   constructor() {
@@ -150,6 +160,22 @@ class GlyphSettings extends HTMLElement {
           line-height: 1.5;
         }
 
+        .back {
+          color: #000000;
+          font-size: 0.85rem;
+        }
+
+        .info {
+          margin: 0.5rem 0 0 0;
+          font-size: 0.85rem;
+        }
+
+        .status[data-state='offline'],
+        .status[data-state='conflict'],
+        .status[data-state='error'] {
+          color: #c0392b;
+        }
+
         button {
           background: transparent;
           color: #000000;
@@ -174,15 +200,13 @@ class GlyphSettings extends HTMLElement {
         }
       </style>
 
-      <section>
-        <h3>grid</h3>
+           <section>
+        <h3>project</h3>
         <div class="controls">
-          <button data-size="8">8×8</button>
-          <button data-size="16">16×16</button>
-          <button data-size="32">32×32</button>
-          <button data-size="64">64×64</button>
-          <button data-size="128">128×128</button>
+          <a class="back" href="#/projects">← projects</a>
         </div>
+        <p class="info" id="gridInfo"></p>
+        <p class="info status" id="saveStatus"></p>
       </section>
 
       <section>
@@ -214,7 +238,7 @@ class GlyphSettings extends HTMLElement {
       </section>
 
       <section>
-        <h3>project</h3>
+        <h3>font</h3>
         <input id="nameInput" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="font name" />
         <div class="controls">
           <button id="exportUfoBtn" title="the whole font as a .ufo that Glyphs opens">save ufo</button>
@@ -244,12 +268,6 @@ class GlyphSettings extends HTMLElement {
    */
   setUpEventListeners() {
     const byId = (id) => this.shadowRoot.getElementById(id)
-
-    this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.addEventListener('click', () =>
-        this.emit('size-change', { size: parseInt(btn.dataset.size) })
-      )
-    })
 
     byId('glyphPrevBtn').addEventListener('click', () => this.emit('glyph-step', { delta: -1 }))
     byId('glyphNextBtn').addEventListener('click', () => this.emit('glyph-step', { delta: 1 }))
@@ -309,9 +327,11 @@ class GlyphSettings extends HTMLElement {
     if (!byId('panelBtn')) return // Not rendered yet
 
     const size = this.getAttribute('size')
-    this.shadowRoot.querySelectorAll('[data-size]').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.size === size)
-    })
+    byId('gridInfo').textContent = size ? `${size}×${size} grid, fixed for this project` : ''
+
+    const status = byId('saveStatus')
+    status.textContent = this.getAttribute('save-status') || ''
+    status.dataset.state = this.getAttribute('save-state') || ''
 
     byId('panelBtn').classList.toggle('active', this.getAttribute('panel') === 'open')
     byId('copyBtn').classList.toggle('active', this.getAttribute('copy') === 'on')

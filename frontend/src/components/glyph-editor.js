@@ -29,7 +29,6 @@
  */
 
 import {
-  SIZES,
   createGrid,
   clearGrid,
   drawLine,
@@ -39,13 +38,12 @@ import {
   pixelsEqual,
 } from '../core/grid.js'
 import { createHistory, pushState, undoState, redoState } from '../core/history.js'
-import { getMetrics, defaultMargin, UPM } from '../metrics.js'
+import { getMetrics, UPM } from '../metrics.js'
 import {
   glyphIsEmpty,
   cloneShapes,
   cloneSpacing,
   noSpacing,
-  serializeGlyph,
   deserializeGlyph,
 } from '../core/glyph.js'
 import { effectiveSpacing } from '../core/spacing.js'
@@ -71,19 +69,11 @@ import {
 import { paintShapes, traceShapes } from '../utils/paint-shapes.js'
 import { gridToPngBlob } from '../utils/export-png.js'
 import { downloadText, downloadBlob } from '../utils/download.js'
-import {
-  loadGlyph,
-  saveGlyph,
-  loadMargin,
-  saveMargin,
-  loadName,
-  saveName,
-  loadCellSize,
-  saveCellSize,
-  loadPanelOpen,
-  savePanelOpen,
-  clearAll as clearAllSaved,
-} from '../utils/storage.js'
+import { loadCellSize, saveCellSize, loadPanelOpen, savePanelOpen } from '../utils/storage.js'
+import { getProject } from '../utils/api.js'
+import { loadPending } from '../utils/pending.js'
+import { ProjectSync } from '../utils/project-sync.js'
+import { reconcilePending } from '../core/sync.js'
 
 // Default cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
 const CELL_PX = { 8: 64, 16: 32, 32: 20, 64: 12, 128: 7 }
@@ -106,7 +96,7 @@ const GUIDE_COLORS = {
 }
 
 const MAX_BRUSH = 32
-const SAVE_DELAY = 300 // ms between a change and the save to localStorage
+const SAVE_DELAY = 300 // ms between a change and the redraw of the glyph's box in the glyph list
 
 // Resize handles as [hx, hy] along the local axes of the frame. Corners first, so they win over edges.
 const HANDLES = [
@@ -196,7 +186,7 @@ class GlyphEditor extends HTMLElement {
     super()
     this.attachShadow({ mode: 'open' })
     this.size = 32 // Active grid size
-    this.sets = new Map() // size -> { margin, name, glyphs: Map(char -> { grid, shapes, history }) }, loaded on first use
+    this.sets = new Map() // size -> { margin, name, glyphs: Map(char -> { grid, shapes, history }) }, only the size of the project
     this.cellSizes = {} // size -> on-screen size of one cell in CSS px, loaded on first use
     this.wheelAccum = 0 // Collects small scroll steps, so a pinch does not zoom wildly
     this.currentChar = 'A' // The glyph being drawn
@@ -210,8 +200,10 @@ class GlyphEditor extends HTMLElement {
     this.message = '' // Short message about the last action, shown under the canvas
     this.messageTimer = null
 
-    this.dirty = new Map() // 'size:char' -> { size, char }: glyphs that have changed since the last save
-    this.saveTimer = null
+    this.projectId = null // The project being edited, from the project-id attribute
+    this.sync = null // Saves the changes to the server, see utils/project-sync.js
+    this.panelPending = new Set() // Glyphs whose box in the glyph list needs a redraw
+    this.panelTimer = null
     this.previewFrame = null
 
     this.dragMode = null // null, 'stroke', 'marquee', 'create', 'liftpending', 'move', 'resize' or 'rotate'
@@ -282,12 +274,11 @@ class GlyphEditor extends HTMLElement {
 
   /**
    * The glyph set of a grid size: its side margin, font name and glyphs.
-   * Loaded from localStorage the first time a size is used.
+   * A project has one grid size, so there is only one set.
    * @param {number} size
    * @returns {Object} { margin, name, glyphs }
    */
   setFor(size) {
-    if (!this.sets.has(size)) this.sets.set(size, this.loadSet(size))
     return this.sets.get(size)
   }
 
@@ -316,31 +307,26 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Loads the saved glyphs and margin of a grid size.
-   * @param {number} size
+   * Makes the glyph set from a project that was loaded from the server.
+   * A damaged glyph is skipped.
+   * @param {Object} project - { name, margin, glyphs: { char: { size, bits, shapes, spacing } } }
    * @returns {Object} { margin, name, glyphs }
    */
-  loadSet(size) {
-    const savedMargin = loadMargin(size)
-    const set = {
-      margin:
-        savedMargin === null ? defaultMargin(size) : clamp(savedMargin, 0, Math.floor(size / 4)),
-      name: loadName(size) || 'Pixel Font',
-      glyphs: new Map(),
-    }
+  buildSet(project) {
+    const glyphs = new Map()
 
     for (const char of ALL_GLYPHS) {
-      const data = loadGlyph(size, char)
-      if (!data || data.size !== size) continue
+      const data = project.glyphs[char]
+      if (!data) continue
 
       try {
-        set.glyphs.set(char, { ...deserializeGlyph(data), history: createHistory() })
+        glyphs.set(char, { ...deserializeGlyph(data), history: createHistory() })
       } catch (error) {
-        continue // A damaged entry is skipped
+        continue // A damaged glyph is skipped
       }
     }
 
-    return set
+    return { margin: project.margin, name: project.name, glyphs }
   }
 
   /**
@@ -455,11 +441,125 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Called whenever the element is added to the DOM.
+   * Called whenever the element is added to the DOM. The project is loaded
+   * first, and the editor starts when it has arrived.
    */
   connectedCallback() {
+    this.projectId = this.getAttribute('project-id')
+
+    if (!this.projectId) {
+      this.showMessagePage('no project is selected.')
+      return
+    }
+
+    this.showMessagePage('loading project…')
+    this.loadProject()
+  }
+
+  /**
+   * Shows a short message instead of the editor, with a link back to the
+   * project list and optionally a button to try loading again.
+   * @param {string} text
+   * @param {boolean} retry - show the "try again" button
+   */
+  showMessagePage(text, retry = false) {
+    // The editor is gone, so its global listeners must go too. A start that fails halfway
+    // would otherwise leave them behind.
+    document.removeEventListener('keydown', this.onKeyDown)
+    window.removeEventListener('resize', this.onResize)
+    window.removeEventListener('pagehide', this.onPageHide)
+
+    if (this.sync) {
+      this.sync.dispose()
+      this.sync = null
+    }
+    const root = this.shadowRoot
+
+    root.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          padding: 2rem;
+          color: #000000;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          font-size: 0.85rem;
+        }
+
+        a {
+          color: #000000;
+        }
+
+        button {
+          margin-left: 0.5rem;
+          padding: 0.5rem 0.9rem;
+          border: 1px solid #000000;
+          background: transparent;
+          color: #000000;
+          font-size: 0.85rem;
+          font-family: inherit;
+          cursor: pointer;
+        }
+
+        button:hover {
+          background: #000000;
+          color: #ffffff;
+        }
+      </style>
+      <p id="text"></p>
+      <p id="links"><a href="#/projects">← projects</a></p>
+    `
+    root.getElementById('text').textContent = text
+
+    if (retry) {
+      const button = document.createElement('button')
+      button.textContent = 'try again'
+      button.addEventListener('click', () => {
+        this.showMessagePage('loading project…')
+        this.loadProject()
+      })
+      root.getElementById('links').append(button)
+    }
+  }
+
+  /**
+   * Loads the project from the server and starts the editor.
+   */
+  async loadProject() {
+    try {
+      const project = await getProject(this.projectId)
+      if (this.isConnected) this.start(project)
+    } catch (error) {
+      // A 401 ends the session, and the app shows the login page.
+      if (!this.isConnected || error.status === 401) return
+
+      if (error.status === undefined) console.error(error)
+      this.showMessagePage(
+        error.status === 404 ? 'this project does not exist.' : error.message,
+        error.status !== 404
+      )
+    }
+  }
+
+  /**
+   * Starts the editor with a project from the server. Unsaved changes that
+   * were kept in this browser from an earlier session are put back first.
+   * @param {Object} project - { id, name, gridSize, margin, revision, glyphs }
+   */
+  start(project) {
+    this.size = project.gridSize
+    this.sets = new Map([[this.size, this.buildSet(project)]])
+
+    this.sync = new ProjectSync({
+      projectId: project.id,
+      revision: project.revision,
+      getGlyph: (char) => this.set.glyphs.get(char),
+      onStatus: (state, message) => this.showSaveStatus(state, message),
+      onConflict: () => this.resolveConflict(),
+    })
+
     this.render()
     this.setUpEventListeners()
+    this.showSaveStatus('saved')
 
     this.panel.source = () => ({
       current: this.currentChar,
@@ -479,8 +579,163 @@ class GlyphEditor extends HTMLElement {
       effective: effectiveSpacing(this.session, this.size, this.set.margin),
     })
 
+    this.restorePending(project)
+
     this.syncToolbar()
     this.updateZoomLabel()
+    this.panel.rebuild()
+    this.preview.refresh()
+    this.spacingPanel.refresh()
+    this.updateNotice()
+    this.draw()
+
+    // Saves what was put back, or removes the kept changes if there were none.
+    this.sync.flush()
+  }
+
+  /**
+   * Called whenever the element is removed from the DOM. Unsaved changes are
+   * sent, and kept in localStorage in case that does not work.
+   */
+  disconnectedCallback() {
+    if (this.sync) {
+      this.sync.flush({ keepalive: true })
+      this.sync.dispose()
+    }
+
+    clearTimeout(this.messageTimer)
+    clearTimeout(this.panelTimer)
+    cancelAnimationFrame(this.previewFrame)
+    document.removeEventListener('keydown', this.onKeyDown)
+    window.removeEventListener('resize', this.onResize)
+    window.removeEventListener('pagehide', this.onPageHide)
+  }
+
+  /**
+   * Puts back unsaved changes from an earlier session. If the project has
+   * been changed elsewhere since, the user chooses which version to keep.
+   * @param {Object} project - the project as loaded from the server
+   */
+  restorePending(project) {
+    const pending = loadPending(project.id)
+    const decision = reconcilePending(pending, project)
+
+    let keepGlyphs = decision === 'apply'
+    let keepMeta = pending !== null
+
+    if (decision === 'conflict') {
+      const count = Object.keys(pending.glyphs).length
+
+      keepGlyphs = !window.confirm(
+        `${count} glyph${count === 1 ? '' : 's'} you changed were never saved, and the project has been changed elsewhere since.\n\n` +
+          'OK: use the saved version and discard your unsaved changes.\n' +
+          'Cancel: keep your changes and overwrite the saved glyphs.'
+      )
+      keepMeta = keepGlyphs
+    }
+
+    if (keepGlyphs) this.applyPendingGlyphs(pending.glyphs)
+    if (keepMeta) this.applyPendingMeta(pending.meta)
+  }
+
+  /**
+   * Puts unsaved glyphs back into the glyph set and marks them for saving.
+   * @param {Object} glyphs - { char: glyph|null }, null for a glyph that was deleted
+   */
+  applyPendingGlyphs(glyphs) {
+    const set = this.set
+
+    for (const [char, data] of Object.entries(glyphs)) {
+      if (!ALL_GLYPHS.includes(char)) continue
+
+      if (data === null) {
+        set.glyphs.delete(char)
+      } else {
+        try {
+          set.glyphs.set(char, { ...deserializeGlyph(data), history: createHistory() })
+        } catch (error) {
+          continue // A damaged glyph is skipped
+        }
+      }
+
+      this.sync.markDirty(char)
+    }
+  }
+
+  /**
+   * Puts an unsaved name and margin back and marks them for saving.
+   * @param {Object} meta - { name?, margin? }
+   */
+  applyPendingMeta(meta) {
+    if (!meta) return
+
+    const set = this.set
+
+    if (typeof meta.name === 'string' && meta.name.trim()) {
+      set.name = meta.name
+      this.sync.markMeta({ name: meta.name })
+    }
+
+    if (Number.isInteger(meta.margin)) {
+      set.margin = clamp(meta.margin, 0, Math.floor(this.size / 4))
+      this.sync.markMeta({ margin: set.margin })
+    }
+  }
+
+  /**
+   * Asks what to do when the project was changed elsewhere (another tab or
+   * device) while there are unsaved changes. Called by the sync when the
+   * server answers 409.
+   * @returns {Promise<void>} resolves when the sync can try again
+   */
+  async resolveConflict() {
+    const latest = await getProject(this.projectId)
+    const count = this.sync.dirtyChars().length
+
+    const discard = window.confirm(
+      'This project was changed elsewhere, in another tab or on another device.\n\n' +
+        `OK: load the latest version and discard your ${count} unsaved glyph${count === 1 ? '' : 's'}.\n` +
+        'Cancel: keep your unsaved glyphs and overwrite them in the saved version.'
+    )
+
+    if (discard) {
+      this.sync.discard(latest.revision)
+      this.replaceData(latest, new Set())
+    } else {
+      this.sync.rebase(latest.revision)
+      this.replaceData(latest, new Set(this.sync.dirtyChars()))
+    }
+  }
+
+  /**
+   * Replaces the glyphs with a newer version of the project from the server.
+   * Glyphs in `keep` stay as they are here. The name and margin stay if they
+   * have unsaved changes.
+   * @param {Object} project - the project as loaded from the server
+   * @param {Set<string>} keep - the glyphs to keep
+   */
+  replaceData(project, keep) {
+    this.cancelFloating()
+    this.selection = null
+    this.selectedShapes = []
+
+    const old = this.set
+    const set = this.buildSet(project)
+
+    if ('margin' in this.sync.meta) set.margin = old.margin
+    if ('name' in this.sync.meta) set.name = old.name
+
+    for (const char of keep) {
+      const record = old.glyphs.get(char)
+
+      if (record) set.glyphs.set(char, record)
+      else set.glyphs.delete(char)
+    }
+
+    this.sets.set(this.size, set)
+
+    this.syncToolbar()
+    this.settings.setAttribute('margin', set.margin)
     this.panel.rebuild()
     this.preview.refresh()
     this.spacingPanel.refresh()
@@ -489,15 +744,33 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Called whenever the element is removed from the DOM.
+   * Shows the state of the saving in the settings panel.
+   * @param {string} state - 'saved', 'saving', 'unsaved', 'offline', 'conflict' or 'error'
+   * @param {string} [message] - the reason, for 'offline' and 'error'
    */
-  disconnectedCallback() {
-    this.flushSaves()
-    clearTimeout(this.messageTimer)
-    cancelAnimationFrame(this.previewFrame)
-    document.removeEventListener('keydown', this.onKeyDown)
-    window.removeEventListener('resize', this.onResize)
-    window.removeEventListener('pagehide', this.onPageHide)
+  showSaveStatus(state, message = '') {
+    const settings = this.settings
+    if (!settings) return
+
+    const texts = {
+      saved: 'saved',
+      saving: 'saving…',
+      unsaved: 'unsaved changes',
+      offline: 'could not reach the server. your changes are kept and saved when it answers',
+      conflict: 'the project was changed elsewhere',
+      error: `not saved: ${message}`,
+    }
+
+    settings.setAttribute('save-state', state)
+    settings.setAttribute('save-status', texts[state] || state)
+  }
+
+  /**
+   * Redraws the boxes in the glyph list for glyphs that have changed.
+   */
+  refreshPanelGlyphs() {
+    for (const char of this.panelPending) this.panel.refreshGlyph(char)
+    this.panelPending.clear()
   }
 
   /**
@@ -637,7 +910,6 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('clear', () => this.clear())
     toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
 
-    settings.addEventListener('size-change', (e) => this.setSize(e.detail.size))
     settings.addEventListener('glyph-step', (e) => this.stepGlyph(e.detail.delta))
     settings.addEventListener('panel-toggle', () => this.togglePanel())
     settings.addEventListener('copy-start', () => this.startCopy())
@@ -834,15 +1106,16 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Notes that a glyph has changed: it is saved shortly after, and the
+   * Notes that a glyph has changed: it is saved shortly after (server), and the
    * text preview is redrawn on the next frame.
    * @param {string} char - the glyph that changed, the current one by default
    */
   markChanged(char = this.currentChar) {
-    this.dirty.set(`${this.size}:${char}`, { size: this.size, char })
+    this.sync.markDirty(char)
 
-    clearTimeout(this.saveTimer)
-    this.saveTimer = setTimeout(() => this.flushSaves(), SAVE_DELAY)
+    this.panelPending.add(char)
+    clearTimeout(this.panelTimer)
+    this.panelTimer = setTimeout(() => this.refreshPanelGlyphs(), SAVE_DELAY)
 
     this.requestPreview()
   }
@@ -862,23 +1135,11 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Writes every changed glyph to localStorage and updates its box in the
-   * panel. Empty glyphs are removed from storage.
+   * Sends every unsaved change to the server now. The changes are also kept
+   * in localStorage in case the request does not get through.
    */
   flushSaves() {
-    clearTimeout(this.saveTimer)
-    let failed = false
-
-    for (const { size, char } of this.dirty.values()) {
-      const record = this.sets.get(size)?.glyphs.get(char)
-      const data = record && !glyphIsEmpty(record) ? serializeGlyph(record) : null
-
-      if (!saveGlyph(size, char, data)) failed = true
-      if (size === this.size) this.panel.refreshGlyph(char)
-    }
-
-    this.dirty.clear()
-    if (failed) this.flash('could not save: browser storage is full or blocked')
+    if (this.sync) this.sync.flush({ keepalive: true })
   }
 
   /**
@@ -1774,34 +2035,6 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Switches to another grid size. Every size has its own set of glyphs, so
-   * nothing is lost or converted.
-   * @param {number} size - 8, 16, 32, 64 or 128
-   */
-  setSize(size) {
-    if (size === this.size) return
-
-    this.commitFloating()
-    this.size = size
-    this.selection = null
-    this.selectedShapes = []
-    this.hoverCell = null
-    this.hoverPoint = null
-
-    const settings = this.settings
-    settings.setAttribute('size', size)
-    settings.setAttribute('margin', this.set.margin)
-    settings.setAttribute('font-name', this.set.name)
-
-    this.updateZoomLabel()
-    this.panel.rebuild()
-    this.preview.refresh()
-    this.spacingPanel.refresh()
-    this.updateNotice()
-    this.draw()
-  }
-
-  /**
    * Makes the brush larger or smaller.
    * @param {number} delta - 1 or -1
    */
@@ -1852,7 +2085,7 @@ class GlyphEditor extends HTMLElement {
   changeMargin(delta) {
     const set = this.set
     set.margin = clamp(set.margin + delta, 0, Math.floor(this.size / 4))
-    saveMargin(this.size, set.margin)
+    this.sync.markMeta({ margin: set.margin })
 
     this.settings.setAttribute('margin', set.margin)
     this.requestPreview()
@@ -2036,8 +2269,10 @@ class GlyphEditor extends HTMLElement {
    */
   setFontName(name) {
     this.set.name = name
-    saveName(this.size, name)
     this.settings.setAttribute('font-name', name)
+
+    // The server does not accept an empty name.
+    if (name.trim()) this.sync.markMeta({ name: name.trim() })
   }
 
   /**
@@ -2202,7 +2437,6 @@ class GlyphEditor extends HTMLElement {
    */
   backup() {
     this.commitFloating()
-    for (const size of SIZES) this.setFor(size) // Loads every size, so none is left out
 
     const backup = createBackup(this.sets, this.preview.getText())
     const count = Object.values(backup.sets).reduce(
@@ -2233,9 +2467,7 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
-   * Replaces everything in the editor with the content of a backup file,
-   * after a confirmation. Undo history is not part of a backup, so it starts
-   * empty.
+   * Replaces every drawing in this project with the content of a backup file. Only the glyphs of this project’s grid size are used.
    * @param {string} json - the file content
    */
   restoreBackup(json) {
@@ -2248,50 +2480,51 @@ class GlyphEditor extends HTMLElement {
       return
     }
 
-    const count = backup.sets.reduce((sum, set) => sum + set.glyphs.length, 0)
+    const saved = backup.sets.find((set) => set.size === this.size)
+
+    if (!saved) {
+      this.flash(`could not restore: the backup has no ${this.size}×${this.size} glyphs`)
+      return
+    }
+
+    const ignored = backup.sets.length - 1
+    const note = ignored > 0 ? ` The other grid sizes in the backup (${ignored}) are ignored.` : ''
+
     if (
       !window.confirm(
-        `Restore ${count} glyphs from this backup? Everything currently in the editor is replaced.`
+        `Restore ${saved.glyphs.length} glyphs from this backup? Every drawing in this project is replaced.${note}`
       )
     )
       return
 
     this.cancelFloating()
-    clearTimeout(this.saveTimer)
-    this.dirty.clear()
-    clearAllSaved()
-    this.sets.clear()
-    this.cellSizes = {}
     this.selection = null
     this.selectedShapes = []
 
-    for (const saved of backup.sets) {
-      const set = {
-        margin: saved.margin === null ? defaultMargin(saved.size) : saved.margin,
-        name: saved.name || 'Pixel Font',
-        glyphs: new Map(),
-      }
+    const set = this.set
+    const affected = new Set(set.glyphs.keys())
 
-      saveMargin(saved.size, set.margin)
-      saveName(saved.size, set.name)
+    set.glyphs = new Map()
+    if (saved.margin !== null) set.margin = saved.margin
 
-      for (const { char, grid, shapes, spacing } of saved.glyphs) {
-        set.glyphs.set(char, { grid, shapes, spacing, history: createHistory() })
-        saveGlyph(saved.size, char, serializeGlyph({ grid, shapes, spacing }))
-      }
-
-      this.sets.set(saved.size, set)
+    for (const { char, grid, shapes, spacing } of saved.glyphs) {
+      set.glyphs.set(char, { grid, shapes, spacing, history: createHistory() })
+      affected.add(char)
     }
 
-    savePanelOpen(this.panelOpen)
+    // Glyphs that are no longer there are deleted on the server.
+    for (const char of affected) this.sync.markDirty(char)
+    this.sync.markMeta({ margin: set.margin })
+    this.sync.flush()
+
     this.preview.setText(backup.text)
     this.spacingPanel.refresh()
 
     this.syncToolbar()
-    this.settings.setAttribute('margin', this.set.margin)
+    this.settings.setAttribute('margin', set.margin)
     this.updateZoomLabel()
     this.panel.rebuild()
-    this.flash(`restored ${count} glyphs`)
+    this.flash(`restored ${saved.glyphs.length} glyphs`)
     this.updateNotice()
     this.draw()
   }

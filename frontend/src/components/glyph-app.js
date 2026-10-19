@@ -127,22 +127,14 @@ class GlyphApp extends HTMLElement {
   }
 
   /**
-   * Shows the editor. The editor does not use the project id yet (step 5), so
-   * it still shows the local drawing. The link back is temporary and moves
-   * into the settings panel in step 5.
+   * Shows the editor for a project. The editor loads and saves the project itself.
    * @param {string} projectId
    */
   showEditor(projectId) {
     const editor = document.createElement('glyph-editor')
     editor.setAttribute('project-id', projectId)
 
-    const back = document.createElement('a')
-    back.href = '#/projects'
-    back.textContent = '← projects'
-    back.style.cssText =
-      'position: fixed; left: 8px; bottom: 8px; z-index: 10; font: inherit; font-size: 12px; color: inherit; opacity: 0.7;'
-
-    this.append(editor, back)
+    this.append(editor)
     this.view = editor
   }
 
