@@ -1,6 +1,112 @@
-@font-face {
-  font-family: 'areal';
-  src: url('/frontend/fonts/ABCAreal.woff2') format('woff2');
-  font-weight: normal;
-  font-style: normal;
+/* Design tokens. Components read them with var(), which also works inside shadow DOM. */
+:root {
+  color-scheme: light;
+
+  --font: 'neue-haas-grotesk-display', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --header-h: 4rem;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --fs-title: 2.2rem;
+  --fs-heading: 1.4rem;
+  --fs-nav: 1.2rem;
+  --fs-body: 0.95rem;
+  --fs-small: 0.8rem;
+
+  --bg: #ffffff;
+  --fg: #000000;
+  --muted: #555555;
+  --faint: #999999;
+  --line-soft: #cccccc;
+
+  --red: #ff0000;
+  --blue: #0000ff;
+  --green: #00ea70;
+  --on-accent: #ffffff;
+  --blue-ui: #0000ff; /* Blue as text, outline and guide: lighter in dark mode */
+
+  --grid-minor: #d9d9d9;
+  --grid-major: #8c8c8c;
+  --missing-box: rgba(0, 0, 0, 0.08);
+  --logo-filter: none;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --fg: #ffffff;
+  --muted: #aaaaaa;
+  --faint: #777777;
+  --line-soft: #444444;
+
+  --blue-ui: #5c5cff;
+
+  --grid-minor: #2a2a2a;
+  --grid-major: #6e6e6e;
+  --missing-box: rgba(255, 255, 255, 0.12);
+  --logo-filter: invert(1);
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+}
+
+glyph-app {
+  display: block;
+  min-height: 100vh;
+}
+
+/* Page changes and theme changes use the View Transitions API where it exists. */
+glyph-header {
+  view-transition-name: site-header;
+}
+
+::view-transition-old(root) {
+  animation: 0.18s var(--ease) both vt-out;
+}
+
+::view-transition-new(root) {
+  animation: 0.32s var(--ease) both vt-in;
+}
+
+:root.theme-transition::view-transition-old(root) {
+  animation: 0.4s var(--ease) both vt-out;
+}
+
+:root.theme-transition::view-transition-new(root) {
+  animation: 0.4s var(--ease) both vt-fade;
+}
+
+@keyframes vt-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes vt-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
 }

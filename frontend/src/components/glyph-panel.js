@@ -15,6 +15,7 @@
 import { GLYPH_GROUPS } from '../core/glyph-set.js'
 import { glyphName } from '../core/glyph-names.js'
 import { paintShapes } from '../utils/paint-shapes.js'
+import { palette } from '../utils/theme.js'
 
 const CELL_CSS = 40 // Box size in CSS px, WAS 44
 const THUMB_PX = 80 // Size of the picture in a box, in image px (the box itself is CELL_CSS)
@@ -26,6 +27,9 @@ class GlyphPanel extends HTMLElement {
     this.source = () => ({ current: '', copyMode: false, size: 32, getGlyph: () => null })
     this.cells = new Map() // char -> button
     this.headings = [] // [{ group, element }]
+    this.onThemeChange = () => {
+      for (const char of this.cells.keys()) this.paintCell(char)
+    }
   }
 
   /**
@@ -33,6 +37,14 @@ class GlyphPanel extends HTMLElement {
    */
   connectedCallback() {
     this.render()
+    window.addEventListener('theme-change', this.onThemeChange)
+  }
+
+  /**
+   * Called whenever the element is removed from the DOM.
+   */
+  disconnectedCallback() {
+    window.removeEventListener('theme-change', this.onThemeChange)
   }
 
   /**
@@ -45,27 +57,21 @@ class GlyphPanel extends HTMLElement {
           display: block;
           box-sizing: border-box;
           position: sticky;
-          top: 0;
+          top: var(--header-h);
           width: 300px;
-          height: 100vh;
-          height: 100dvh;
+          height: calc(100vh - var(--header-h));
+          height: calc(100dvh - var(--header-h));
           overflow-y: auto;
           padding: 1.5rem 1rem;
-          border-right: 1px solid #000000;
-          background: #ffffff;
-          color: #000000;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          border-right: 1px solid var(--fg);
+          background: var(--bg);
+          color: var(--fg);
+          font-family: var(--font);
         }
 
         :host([hidden]) {
           display: none;
         }
-
-        .title {
-          color:red;
-          font-weight:bold;
-        }
-
         .head {
           display: flex;
           align-items: center;
@@ -96,20 +102,20 @@ class GlyphPanel extends HTMLElement {
 
         button {
           font-family: inherit;
-          color: #000000;
+          color: var(--fg);
         }
 
         .close {
           background: transparent;
-          border: 1px solid #000000;
+          border: 1px solid var(--fg);
           padding: 0.5rem 1rem;
           font-size: 0.85rem;
           cursor: pointer;
         }
 
         .close:hover {
-          background: #000000;
-          color: #ffffff;
+          background: var(--fg);
+          color: var(--bg);
         }
 
         .cell {
@@ -117,8 +123,8 @@ class GlyphPanel extends HTMLElement {
           width: ${CELL_CSS}px;
           height: ${CELL_CSS}px;
           padding: 0;
-          border: 1px solid #000000;
-          background: #ffffff;
+          border: 1px solid var(--fg);
+          background: var(--bg);
           cursor: pointer;
         }
 
@@ -138,7 +144,7 @@ class GlyphPanel extends HTMLElement {
           top: 50%;
           transform: translate(-50%, -50%);
           font-size: 1rem;
-          color: #999999;
+          color: var(--faint);
           pointer-events: none;
         }
 
@@ -147,21 +153,21 @@ class GlyphPanel extends HTMLElement {
           top: 1px;
           transform: none;
           font-size: 0.65rem;
-          color: #555555;
+          color: var(--muted);
         }
 
         .cell.current {
-          outline: 2px solid blue;
+          outline: 2px solid var(--blue-ui);
           outline-offset: 1px;
         }
 
         .copying .cell:hover {
-          background: #0bf273;
+          background: var(--green);
         }
       </style>
 
             <div class="head">
-        <span class="title">wood__house glyphs</span>
+        <span class="title">glyphs</span>
         <button class="close" id="closeBtn">close</button>
       </div>
       <p class="hint" id="hint"></p>
@@ -264,7 +270,7 @@ class GlyphPanel extends HTMLElement {
 
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = '#000000'
+    ctx.fillStyle = palette().fg
 
     const { pixels } = glyph.grid
     for (let y = 0; y < size; y++) {

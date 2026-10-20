@@ -64,12 +64,12 @@ class GlyphToolbar extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          font-family: var(--font);
         }
 
         .frame {
-          border-top: 1px solid #000000;
-          border-bottom: 1px solid #000000;
+          border-top: 1px solid var(--fg);
+          border-bottom: 1px solid var(--fg);
           margin-bottom: 1.5rem;
         }
 
@@ -88,7 +88,7 @@ class GlyphToolbar extends HTMLElement {
           justify-content: center;
           gap: 0.5rem;
           padding: 0.75rem 0;
-          border-top: 1px solid #000000;
+          border-top: 1px solid var(--fg);
         }
 
         .shapes.hidden {
@@ -103,20 +103,20 @@ class GlyphToolbar extends HTMLElement {
 
         .label {
           font-size: 0.9rem;
-          color: #000000;
+          color: var(--fg);
         }
 
         .value {
           font-size: 0.85rem;
-          color: #000000;
+          color: var(--fg);
           min-width: 3rem;
           text-align: center;
         }
 
         button {
           background: transparent;
-          color: #000000;
-          border: 1px solid #000000;
+          color: var(--fg);
+          border: 1px solid var(--fg);
           font-weight: 400;
           padding: 0.5rem 1rem;
           cursor: pointer;
@@ -126,14 +126,14 @@ class GlyphToolbar extends HTMLElement {
         }
 
         button:hover {
-          background: #000000;
-          color: #ffffff;
+          background: var(--fg);
+          color: var(--bg);
         }
 
         button.active {
-          background: #05cf67;
-          color: #ffffff;
-          border-color: #05cf67;
+          background: var(--green);
+          color: var(--on-accent);
+          border-color: var(--green);
         }
 
         button.shape {

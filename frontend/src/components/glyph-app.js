@@ -1,16 +1,18 @@
 /**
- * The app: shows the login page, the project list or the editor depending on
- * the hash of the URL and on whether the user is logged in. It owns the state
- * and does all requests. The views only show data and send events.
+ * The app: the header, and below it the login page, the new font page, the
+ * profile or the editor, depending on the hash of the URL and on whether the
+ * user is logged in. It owns the state and does all requests. The views only
+ * show data and send events.
  *
  * It has no shadow DOM, so that the editor is drawn exactly as before.
  *
- * @version 0.1.0
+ * @version 0.3.0
  */
 
 import { parseRoute, resolveRoute, routeToHash } from '../core/route.js'
 import * as api from '../utils/api.js'
 import { clearSession, getSession, saveSession } from '../utils/session.js'
+import { canAnimate, getTheme, toggleTheme } from '../utils/theme.js'
 
 class GlyphApp extends HTMLElement {
   /**
@@ -18,7 +20,10 @@ class GlyphApp extends HTMLElement {
    */
   constructor() {
     super()
+    this.header = null
+    this.main = null
     this.view = null
+    this.route = null
     this.projects = []
     this.loading = false
     this.busy = false
@@ -31,14 +36,22 @@ class GlyphApp extends HTMLElement {
       this.notice = 'your session has expired. log in again.'
       this.navigate()
     }
+    this.onThemeChange = () => {
+      if (this.view && typeof this.view.refresh === 'function') this.view.refresh()
+    }
   }
 
   /**
-   * Starts listening and shows the first view.
+   * Draws the header, starts listening and shows the first view.
    */
   connectedCallback() {
+    this.header = document.createElement('glyph-header')
+    this.main = document.createElement('main')
+    this.replaceChildren(this.header, this.main)
+
     window.addEventListener('hashchange', this.onHashChange)
     window.addEventListener('session-expired', this.onSessionExpired)
+    window.addEventListener('theme-change', this.onThemeChange)
     this.navigate()
   }
 
@@ -48,6 +61,7 @@ class GlyphApp extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener('hashchange', this.onHashChange)
     window.removeEventListener('session-expired', this.onSessionExpired)
+    window.removeEventListener('theme-change', this.onThemeChange)
   }
 
   /**
@@ -69,7 +83,18 @@ class GlyphApp extends HTMLElement {
       return
     }
 
-    this.show(route)
+    this.header.setAttribute('route', route.name)
+    this.header.toggleAttribute('signed-in', loggedIn)
+
+    const swap = () => this.show(route)
+
+    if (this.route && document.startViewTransition && canAnimate()) {
+      document.startViewTransition(swap)
+    } else {
+      swap()
+    }
+
+    this.route = route
   }
 
   /**
@@ -77,12 +102,15 @@ class GlyphApp extends HTMLElement {
    * @param {Object} route - { name, projectId? }
    */
   show(route) {
-    this.replaceChildren()
+    this.main.replaceChildren()
     this.view = null
+    this.error = ''
+    window.scrollTo(0, 0)
 
     if (route.name === 'login') this.showLogin()
     else if (route.name === 'editor') this.showEditor(route.projectId)
-    else this.showProjects()
+    else if (route.name === 'profile') this.showProfile()
+    else this.showNew()
   }
 
   /**
@@ -94,15 +122,28 @@ class GlyphApp extends HTMLElement {
     if (this.notice) view.setAttribute('notice', this.notice)
     view.addEventListener('auth-submit', (event) => this.submitAuth(event.detail))
 
-    this.append(view)
+    this.main.append(view)
     this.view = view
   }
 
   /**
-   * Shows the project list and loads the projects.
+   * Shows the page for a new font.
    */
-  showProjects() {
-    const view = document.createElement('glyph-projects')
+  showNew() {
+    const view = document.createElement('glyph-new')
+
+    view.source = () => ({ busy: this.busy, error: this.error })
+    view.addEventListener('project-create', (event) => this.createProject(event.detail))
+
+    this.main.append(view)
+    this.view = view
+  }
+
+  /**
+   * Shows the profile and loads the projects.
+   */
+  showProfile() {
+    const view = document.createElement('glyph-profile')
 
     view.source = () => ({
       username: (getSession() || {}).username || '',
@@ -110,18 +151,16 @@ class GlyphApp extends HTMLElement {
       loading: this.loading,
       busy: this.busy,
       error: this.error,
+      theme: getTheme(),
     })
 
-    view.addEventListener('project-open', (event) => {
-      window.location.hash = routeToHash({ name: 'editor', projectId: event.detail.id })
-    })
-    view.addEventListener('project-create', (event) => this.createProject(event.detail))
     view.addEventListener('project-rename', (event) => this.renameProject(event.detail))
     view.addEventListener('project-delete', (event) => this.deleteProject(event.detail.id))
     view.addEventListener('projects-reload', () => this.loadProjects())
+    view.addEventListener('theme-toggle', () => toggleTheme())
     view.addEventListener('logout', () => this.logout())
 
-    this.append(view)
+    this.main.append(view)
     this.view = view
     this.loadProjects()
   }
@@ -134,13 +173,13 @@ class GlyphApp extends HTMLElement {
     const editor = document.createElement('glyph-editor')
     editor.setAttribute('project-id', projectId)
 
-    this.append(editor)
+    this.main.append(editor)
     this.view = editor
   }
 
   /**
-   * Logs in or creates an account, and then goes to the project list or to the
-   * project that was asked for before the login.
+   * Logs in or creates an account, and then goes to the new font page or to
+   * the project that was asked for before the login.
    * @param {Object} detail - { mode, username, password }
    */
   async submitAuth({ mode, username, password }) {
@@ -158,7 +197,7 @@ class GlyphApp extends HTMLElement {
         throw new Error('The session could not be saved. Is storage blocked in the browser?')
       }
 
-      const target = this.returnTo || '#/projects'
+      const target = this.returnTo || '#/new'
       this.returnTo = null
       this.notice = ''
       window.location.hash = target
@@ -180,7 +219,7 @@ class GlyphApp extends HTMLElement {
   }
 
   /**
-   * Loads the projects and draws the list.
+   * Loads the projects and draws the profile.
    */
   async loadProjects() {
     const view = this.view
@@ -201,8 +240,8 @@ class GlyphApp extends HTMLElement {
   }
 
   /**
-   * Runs a request from the project list. The list is disabled meanwhile and
-   * shows the error if the request fails.
+   * Runs a request from a page. The page is disabled meanwhile and shows the
+   * error if the request fails.
    * @param {Function} action
    */
   async run(action) {

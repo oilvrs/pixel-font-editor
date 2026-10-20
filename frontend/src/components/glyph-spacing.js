@@ -57,8 +57,8 @@ class GlyphSpacing extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
-          color: #000000;
+          font-family: var(--font);
+          color: var(--fg);
         }
 
         .title {
@@ -71,8 +71,8 @@ class GlyphSpacing extends HTMLElement {
           max-width: 440px;
           margin: 0 auto;
           padding: 1.25rem 1.5rem 1rem 1.5rem;
-          border: 1px solid #000000;
-          background: #ffffff;
+          border: 1px solid var(--fg);
+          background: var(--bg);
         }
 
         .top {
@@ -91,12 +91,12 @@ class GlyphSpacing extends HTMLElement {
         .hex {
           font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
           font-size: 1.1rem;
-          color: #777777;
+          color: var(--muted);
         }
 
         .name {
           font-size: 0.8rem;
-          color: #777777;
+          color: var(--muted);
         }
 
         .middle {
@@ -124,7 +124,7 @@ class GlyphSpacing extends HTMLElement {
 
         label {
           font-size: 0.75rem;
-          color: #777777;
+          color: var(--muted);
         }
 
         input {
@@ -133,22 +133,22 @@ class GlyphSpacing extends HTMLElement {
           max-width: 8rem;
           padding: 0.3rem 0.4rem;
           border: 1px solid transparent;
-          border-bottom: 1px solid #cccccc;
+          border-bottom: 1px solid var(--line-soft);
           border-radius: 0;
           background: transparent;
-          color: #000000;
+          color: var(--fg);
           font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
           font-size: 1.4rem;
           text-align: center;
         }
 
         input.auto {
-          color: #999999;
+          color: var(--faint);
         }
 
         input:focus {
           outline: none;
-          border-color: blue;
+          border-color: var(--blue-ui);
         }
 
         input:disabled {
@@ -160,7 +160,7 @@ class GlyphSpacing extends HTMLElement {
           padding: 0;
           border: none;
           background: transparent;
-          color: blue;
+          color: var(--blue-ui);
           font-family: inherit;
           font-size: 0.75rem;
           cursor: pointer;
@@ -174,7 +174,7 @@ class GlyphSpacing extends HTMLElement {
         .note {
           margin: 0.9rem 0 0 0;
           font-size: 0.8rem;
-          color: #555555;
+          color: var(--muted);
           text-align: center;
         }
       </style>
@@ -323,7 +323,9 @@ class GlyphSpacing extends HTMLElement {
     this.current = effective
 
     root.getElementById('char').textContent = char
-    root.getElementById('hex').textContent = char ? char.codePointAt(0).toString(16).toUpperCase().padStart(4, '0') : ''
+    root.getElementById('hex').textContent = char
+      ? char.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')
+      : ''
     root.getElementById('name').textContent = name
 
     for (const side of SIDES) {

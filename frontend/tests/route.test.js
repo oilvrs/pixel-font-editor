@@ -4,13 +4,18 @@ import { parseRoute, resolveRoute, routeToHash } from '../src/core/route.js'
 
 const ID = '0123456789abcdef01234567'
 
-test('parseRoute reads the three routes', () => {
+test('parseRoute reads the four routes', () => {
+  assert.deepEqual(parseRoute('#/new'), { name: 'new' })
+  assert.deepEqual(parseRoute('#/profile'), { name: 'profile' })
   assert.deepEqual(parseRoute('#/login'), { name: 'login' })
-  assert.deepEqual(parseRoute('#/projects'), { name: 'projects' })
   assert.deepEqual(parseRoute(`#/p/${ID}`), { name: 'editor', projectId: ID })
 })
 
-test('parseRoute falls back to the project list', () => {
+test('parseRoute treats the old projects route as the profile', () => {
+  assert.deepEqual(parseRoute('#/projects'), { name: 'profile' })
+})
+
+test('parseRoute falls back to the new font page', () => {
   for (const hash of [
     '',
     '#',
@@ -22,34 +27,36 @@ test('parseRoute falls back to the project list', () => {
     `#/p/${ID}/extra`,
     `#/p/${ID}0`,
     '#/login/extra',
+    '#/profile/extra',
     undefined,
     null,
   ]) {
-    assert.deepEqual(parseRoute(hash), { name: 'projects' }, String(hash))
+    assert.deepEqual(parseRoute(hash), { name: 'new' }, String(hash))
   }
 })
 
 test('parseRoute ignores a trailing slash and a query string', () => {
   assert.deepEqual(parseRoute('#/login/'), { name: 'login' })
-  assert.deepEqual(parseRoute('#/login?x=1'), { name: 'login' })
+  assert.deepEqual(parseRoute('#/profile?x=1'), { name: 'profile' })
   assert.deepEqual(parseRoute(`#/p/${ID}/`), { name: 'editor', projectId: ID })
 })
 
 test('routeToHash is the inverse of parseRoute', () => {
-  for (const hash of ['#/login', '#/projects', `#/p/${ID}`]) {
+  for (const hash of ['#/new', '#/profile', '#/login', `#/p/${ID}`]) {
     assert.equal(routeToHash(parseRoute(hash)), hash)
   }
 })
 
 test('resolveRoute sends everyone who is logged out to the login page', () => {
-  for (const hash of ['', '#/projects', '#/login', `#/p/${ID}`]) {
+  for (const hash of ['', '#/new', '#/profile', '#/login', `#/p/${ID}`]) {
     assert.deepEqual(resolveRoute(hash, false), { name: 'login' }, hash)
   }
 })
 
 test('resolveRoute keeps the route of someone who is logged in, except login', () => {
-  assert.deepEqual(resolveRoute('#/projects', true), { name: 'projects' })
+  assert.deepEqual(resolveRoute('#/new', true), { name: 'new' })
+  assert.deepEqual(resolveRoute('#/profile', true), { name: 'profile' })
   assert.deepEqual(resolveRoute(`#/p/${ID}`, true), { name: 'editor', projectId: ID })
-  assert.deepEqual(resolveRoute('#/login', true), { name: 'projects' })
-  assert.deepEqual(resolveRoute('', true), { name: 'projects' })
+  assert.deepEqual(resolveRoute('#/login', true), { name: 'new' })
+  assert.deepEqual(resolveRoute('', true), { name: 'new' })
 })

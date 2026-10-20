@@ -74,6 +74,7 @@ import { getProject } from '../utils/api.js'
 import { loadPending } from '../utils/pending.js'
 import { ProjectSync } from '../utils/project-sync.js'
 import { reconcilePending } from '../core/sync.js'
+import { palette } from '../utils/theme.js'
 
 // Default cell size in CSS px per grid size. Always whole numbers, so the grid stays even.
 const CELL_PX = { 8: 64, 16: 32, 32: 20, 64: 12, 128: 7 }
@@ -230,6 +231,7 @@ class GlyphEditor extends HTMLElement {
     this.onKeyDown = this.onKeyDown.bind(this)
     this.onResize = this.onResize.bind(this)
     this.onPageHide = this.onPageHide.bind(this)
+    this.onThemeChange = this.onThemeChange.bind(this)
   }
 
   /**
@@ -468,6 +470,7 @@ class GlyphEditor extends HTMLElement {
     document.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('pagehide', this.onPageHide)
+    window.removeEventListener('theme-change', this.onThemeChange)
 
     if (this.sync) {
       this.sync.dispose()
@@ -480,33 +483,33 @@ class GlyphEditor extends HTMLElement {
         :host {
           display: block;
           padding: 2rem;
-          color: #000000;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          color: var(--fg);
+          font-family: var(--font);
           font-size: 0.85rem;
         }
 
         a {
-          color: #000000;
+          color: var(--fg);
         }
 
         button {
           margin-left: 0.5rem;
           padding: 0.5rem 0.9rem;
-          border: 1px solid #000000;
+          border: 1px solid var(--fg);
           background: transparent;
-          color: #000000;
+          color: var(--fg);
           font-size: 0.85rem;
           font-family: inherit;
           cursor: pointer;
         }
 
         button:hover {
-          background: #000000;
-          color: #ffffff;
+          background: var(--fg);
+          color: var(--bg);
         }
       </style>
       <p id="text"></p>
-      <p id="links"><a href="#/projects">← projects</a></p>
+      <p id="links"><a href="#/profile">← profile</a></p>
     `
     root.getElementById('text').textContent = text
 
@@ -609,6 +612,7 @@ class GlyphEditor extends HTMLElement {
     document.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('pagehide', this.onPageHide)
+    window.removeEventListener('theme-change', this.onThemeChange)
   }
 
   /**
@@ -783,7 +787,7 @@ class GlyphEditor extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          font-family: var(--font);
         }
 
         .layout {
@@ -809,8 +813,8 @@ class GlyphEditor extends HTMLElement {
         .canvas {
           display: block;
           margin: 0 auto;
-          outline: 1px solid #000000;
-          background: #ffffff;
+          outline: 1px solid var(--fg);
+          background: var(--bg);
           cursor: crosshair;
           touch-action: none;
         }
@@ -821,7 +825,7 @@ class GlyphEditor extends HTMLElement {
           justify-content: center;
           gap: 0.5rem 1.25rem;
           font-size: 0.85rem;
-          color: #000000;
+          color: var(--fg);
           margin: 0.75rem 0 0 0;
         }
 
@@ -840,7 +844,7 @@ class GlyphEditor extends HTMLElement {
 
         .notice {
           font-size: 0.85rem;
-          color: #000000;
+          color: var(--fg);
           text-align: center;
           min-height: 1.4em;
           margin: 0.75rem 0 0 0;
@@ -869,8 +873,8 @@ class GlyphEditor extends HTMLElement {
           </div>
           <p class="legend" id="legend">
             <span class="key" style="--c: #ff0000">baseline</span>
-            <span class="key" style="--c: #0000ff">cap-height</span>
-            <span class="key" style="--c: #06a94d">x-height</span>
+            <span class="key" style="--c: var(--blue-ui)">cap-height</span>
+            <span class="key" style="--c: #00ea70">x-height</span>
             <span class="key" style="--c: #7a7a7a">ascender / descender</span>
           </p>
           <p class="notice" id="notice"></p>
@@ -932,6 +936,7 @@ class GlyphEditor extends HTMLElement {
     document.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('resize', this.onResize) // Browser zoom changes the pixel density
     window.addEventListener('pagehide', this.onPageHide) // Save before the page goes away
+    window.addEventListener('theme-change', this.onThemeChange)
   }
 
   /**
@@ -1036,6 +1041,16 @@ class GlyphEditor extends HTMLElement {
   }
 
   /**
+   * Redraws what is drawn with JavaScript when the theme changes.
+   */
+  onThemeChange() {
+    if (!this.sync) return
+
+    this.preview.refresh()
+    this.draw()
+  }
+
+  /**
    * Saves everything that has changed when the page is hidden or closed.
    */
   onPageHide() {
@@ -1078,7 +1093,10 @@ class GlyphEditor extends HTMLElement {
    */
   fitZoom() {
     const stage = this.shadowRoot.querySelector('.stage')
-    const space = Math.min(stage.clientWidth - 2, window.innerHeight - 240)
+    const space = Math.min(
+      stage.clientWidth - 2,
+      window.innerHeight - 240 - (document.querySelector('glyph-header')?.offsetHeight ?? 0)
+    )
 
     this.setCellSize(Math.floor(space / this.size))
   }
@@ -2633,9 +2651,10 @@ class GlyphEditor extends HTMLElement {
     ctx.clearRect(0, 0, total, total)
 
     // Minor lines first, then major lines on top, so the major ones are never overdrawn at crossings
+    const colors = palette()
     const majorEvery = MAJOR_EVERY[size]
     for (const isMajor of [false, true]) {
-      ctx.fillStyle = isMajor ? '#8c8c8c' : '#d9d9d9'
+      ctx.fillStyle = isMajor ? colors.gridMajor : colors.gridMinor
       for (let i = 0; i <= size; i++) {
         if ((i % majorEvery === 0) !== isMajor) continue
         const pos = Math.min(i * cell, total - line)
@@ -2644,14 +2663,14 @@ class GlyphEditor extends HTMLElement {
       }
     }
 
-    ctx.fillStyle = '#000000'
+    ctx.fillStyle = colors.fg
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         if (pixels[y * size + x]) ctx.fillRect(x * cell, y * cell, cell, cell)
       }
     }
 
-    ctx.fillStyle = '#000000'
+    ctx.fillStyle = colors.fg
     paintShapes(ctx, shapes, { scale: cell })
 
     if (this.showGuides) this.drawGuides(view)
@@ -2680,7 +2699,7 @@ class GlyphEditor extends HTMLElement {
     const thickness = line * 2
 
     for (const [name, row] of Object.entries(getMetrics(size))) {
-      ctx.fillStyle = GUIDE_COLORS[name]
+      ctx.fillStyle = name === 'capHeight' ? palette().blueUi : GUIDE_COLORS[name]
       const pos = Math.min(Math.max(row * cell - line, 0), total - thickness)
       ctx.fillRect(0, pos, total, thickness)
     }
@@ -2697,7 +2716,7 @@ class GlyphEditor extends HTMLElement {
 
     ctx.lineWidth = line
     ctx.setLineDash([])
-    ctx.strokeStyle = '#0000ff'
+    ctx.strokeStyle = palette().blueUi
     traceShapes(ctx, shapes, { scale: cell })
     ctx.stroke()
   }
@@ -2711,7 +2730,7 @@ class GlyphEditor extends HTMLElement {
     const { ctx, size, cell } = view
     const { region, x, y } = this.floatingImage()
 
-    ctx.fillStyle = '#0000ff'
+    ctx.fillStyle = palette().blueUi
     for (let ry = 0; ry < region.height; ry++) {
       for (let rx = 0; rx < region.width; rx++) {
         const gx = x + rx

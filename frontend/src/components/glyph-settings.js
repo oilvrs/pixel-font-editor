@@ -67,25 +67,25 @@ class GlyphSettings extends HTMLElement {
           display: block;
           box-sizing: border-box;
           position: sticky;
-          top: 0;
+          top: var(--header-h);
           width: 320px;
-          height: 100vh;
-          height: 100dvh;
+          height: calc(100vh - var(--header-h));
+          height: calc(100dvh - var(--header-h));
           overflow-y: auto;
           padding: 1.5rem;
-          border-left: 1px solid #000000;
-          background: #ffffff;
-          color: #000000;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
+          border-left: 1px solid var(--fg);
+          background: var(--bg);
+          color: var(--fg);
+          font-family: var(--font);
         }
 
         section {
           padding: 1.25rem 0;
-          border-top: 1px solid #000000;
+          border-top: 1px solid var(--fg);
         }
 
         section:first-of-type {
-          padding-top: 0;
+          padding-top: var(--header-h);
           border-top: none;
         }
 
@@ -130,7 +130,7 @@ class GlyphSettings extends HTMLElement {
 
         .name {
           font-size: 0.85rem;
-          color: #555555;
+          color: var(--muted);
         }
 
         input {
@@ -139,29 +139,29 @@ class GlyphSettings extends HTMLElement {
           box-sizing: border-box;
           margin-bottom: 0.5rem;
           padding: 0.5rem;
-          border: 1px solid #000000;
+          border: 1px solid var(--fg);
           border-radius: 0;
           background: transparent;
-          color: #000000;
+          color: var(--fg);
           font-size: 0.85rem;
           font-family: inherit;
         }
 
         input:focus {
-          outline: 2px solid blue;
+          outline: 2px solid var(--blue-ui);
           outline-offset: 0;
         }
 
         .hint {
           margin: 0.5rem 0 0 0;
           padding-top: 1.25rem;
-          border-top: 1px solid #000000;
+          border-top: 1px solid var(--fg);
           font-size: 0.8rem;
           line-height: 1.5;
         }
 
         .back {
-          color: #000000;
+          color: var(--fg);
           font-size: 0.85rem;
         }
 
@@ -173,13 +173,13 @@ class GlyphSettings extends HTMLElement {
         .status[data-state='offline'],
         .status[data-state='conflict'],
         .status[data-state='error'] {
-          color: #c0392b;
+          color: #ff1900;
         }
 
         button {
           background: transparent;
-          color: #000000;
-          border: 1px solid #000000;
+          color: var(--fg);
+          border: 1px solid var(--fg);
           font-weight: 400;
           padding: 0.5rem 0.9rem;
           cursor: pointer;
@@ -189,21 +189,21 @@ class GlyphSettings extends HTMLElement {
         }
 
         button:hover {
-          background: #000000;
-          color: #ffffff;
+          background: var(--fg);
+          color: var(--bg);
         }
 
         button.active {
-          background: blue;
-          color: #ffffff;
-          border-color: blue;
+          background: var(--blue-ui);
+          color: var(--on-accent);
+          border-color: var(--blue-ui);
         }
       </style>
 
            <section>
         <h3>project</h3>
         <div class="controls">
-          <a class="back" href="#/projects">← projects</a>
+          <a class="back" href="#/profile">← profile</a>
         </div>
         <p class="info" id="gridInfo"></p>
         <p class="info status" id="saveStatus"></p>

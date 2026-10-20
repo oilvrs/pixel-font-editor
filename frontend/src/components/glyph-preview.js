@@ -14,6 +14,7 @@
 import { layoutText } from '../core/layout.js'
 import { paintShapes } from '../utils/paint-shapes.js'
 import { loadText, saveText } from '../utils/storage.js'
+import { palette } from '../utils/theme.js'
 
 const DEFAULT_TEXT = 'Hamburgefonstiv'
 const TARGET_HEIGHT = 96 // Wanted height of one line, in CSS px, when choosing the default zoom
@@ -50,8 +51,8 @@ class GlyphPreview extends HTMLElement {
       <style>
         :host {
           display: block;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
-          color: #000000;
+          font-family: var(--font);
+          color: var(--fg);
         }
 
         .head {
@@ -79,8 +80,8 @@ class GlyphPreview extends HTMLElement {
 
         button {
           background: transparent;
-          color: #000000;
-          border: 1px solid #000000;
+          color: var(--fg);
+          border: 1px solid var(--fg);
           padding: 0.5rem 1rem;
           cursor: pointer;
           font-size: 0.85rem;
@@ -88,8 +89,8 @@ class GlyphPreview extends HTMLElement {
         }
 
         button:hover {
-          background: #000000;
-          color: #ffffff;
+          background: var(--fg);
+          color: var(--bg);
         }
 
         textarea {
@@ -97,17 +98,17 @@ class GlyphPreview extends HTMLElement {
           width: 100%;
           box-sizing: border-box;
           padding: 0.5rem;
-          border: 1px solid #000000;
+          border: 1px solid var(--fg);
           border-radius: 0;
           background: transparent;
-          color: #000000;
+          color: var(--fg);
           font-size: 0.9rem;
           font-family: inherit;
           resize: vertical;
         }
 
         textarea:focus {
-          outline: 2px solid blue;
+          outline: 2px solid var(--blue-ui);
           outline-offset: 0;
         }
 
@@ -115,8 +116,8 @@ class GlyphPreview extends HTMLElement {
           overflow: auto;
           margin-top: 0.75rem;
           padding: 1rem;
-          border: 1px solid #000000;
-          background: #ffffff;
+          border: 1px solid var(--fg);
+          background: var(--bg);
         }
 
         canvas {
@@ -155,7 +156,9 @@ class GlyphPreview extends HTMLElement {
 
     this.shadowRoot.getElementById('zoomOutBtn').addEventListener('click', () => this.zoom(-1))
     this.shadowRoot.getElementById('zoomInBtn').addEventListener('click', () => this.zoom(1))
-    this.shadowRoot.getElementById('canvas').addEventListener('pointerdown', (e) => this.onPointerDown(e))
+    this.shadowRoot
+      .getElementById('canvas')
+      .addEventListener('pointerdown', (e) => this.onPointerDown(e))
   }
 
   /**
@@ -173,7 +176,8 @@ class GlyphPreview extends HTMLElement {
     const y = ((e.clientY - rect.top) * deviceScale) / this.cell
 
     const hit = this.layout.items.find(
-      (item) => x >= item.x && x < item.x + item.advance && y >= item.y && y < item.y + this.gridSize
+      (item) =>
+        x >= item.x && x < item.x + item.advance && y >= item.y && y < item.y + this.gridSize
     )
 
     if (hit) this.dispatchEvent(new CustomEvent('glyph-pick', { detail: { char: hit.char } }))
@@ -290,7 +294,7 @@ class GlyphPreview extends HTMLElement {
       const boxRight = Math.round((item.x + item.advance) * cell)
 
       if (item.missing) {
-        ctx.fillStyle = item.char === current ? 'rgba(0, 0, 255, 0.14)' : 'rgba(0, 0, 0, 0.08)'
+        ctx.fillStyle = item.char === current ? 'rgba(0, 0, 255, 0.14)' : palette().missingBox
         ctx.fillRect(boxLeft, top, boxRight - boxLeft, size * cell)
         continue
       }
@@ -302,7 +306,7 @@ class GlyphPreview extends HTMLElement {
       const left = Math.round((item.x + item.inkOffset) * cell)
       const { pixels } = item.grid
 
-      ctx.fillStyle = '#000000'
+      ctx.fillStyle = palette().fg
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
           if (pixels[y * size + x]) ctx.fillRect(left + x * cell, top + y * cell, cell, cell)
