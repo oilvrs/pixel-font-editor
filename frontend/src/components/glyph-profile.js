@@ -10,6 +10,9 @@
  * @version 0.1.0
  */
 
+import { palette } from '../utils/theme.js'
+import { drawThumbnail } from '../utils/thumbnail.js'
+
 const MAX_NAME_LENGTH = 60
 const COLORS = ['var(--red)', 'var(--green)', 'var(--blue)']
 
@@ -30,6 +33,10 @@ class GlyphProfile extends HTMLElement {
     super()
     this.attachShadow({ mode: 'open' })
     this.animated = false // The cards fade in once, not on every redraw
+    this.thumbData = new WeakMap() // thumbnail element -> project
+    this.observer = new ResizeObserver((entries) => {
+      for (const entry of entries) this.drawThumbnailOf(entry.target)
+    })
     this.source = () => ({
       username: '',
       projects: [],
@@ -47,6 +54,13 @@ class GlyphProfile extends HTMLElement {
     this.render()
     this.setUpEventListeners()
     this.refresh()
+  }
+
+  /**
+   * Stops watching the thumbnails.
+   */
+  disconnectedCallback() {
+    this.observer.disconnect()
   }
 
   /**
@@ -177,12 +191,13 @@ class GlyphProfile extends HTMLElement {
           display: flex;
           flex: 1;
           align-items: center;
+          justify-content: flex-start;
           min-height: 0;
-          font-family: Arial, Helvetica, sans-serif; /* Placeholder until the font's own glyphs are drawn */
-          font-size: 3.2rem;
-          font-weight: 700;
-          letter-spacing: -0.02em;
-          line-height: 1;
+          overflow: hidden;
+        }
+
+        .thumb canvas {
+          display: block;
         }
 
         .name {
@@ -295,6 +310,8 @@ class GlyphProfile extends HTMLElement {
   refresh() {
     if (!this.isConnected || !this.grid) return
 
+    this.observer.disconnect()
+
     const { username, projects, loading, busy, error, theme } = this.source()
     const dark = theme === 'dark'
 
@@ -351,7 +368,9 @@ class GlyphProfile extends HTMLElement {
     const thumb = document.createElement('div')
     thumb.className = 'thumb'
     thumb.setAttribute('aria-hidden', 'true')
-    thumb.textContent = 'Ab Bb'
+    thumb.append(document.createElement('canvas'))
+    this.thumbData.set(thumb, project)
+    this.observer.observe(thumb)
 
     const name = document.createElement('div')
     name.className = 'name'
@@ -394,6 +413,18 @@ class GlyphProfile extends HTMLElement {
 
     card.append(paper, actions)
     return card
+  }
+
+  /**
+   * Draws the thumbnail of a card, at the width the card has now.
+   * @param {HTMLElement} thumb
+   */
+  drawThumbnailOf(thumb) {
+    const project = this.thumbData.get(thumb)
+    const width = thumb.clientWidth
+    if (!project || width === 0) return
+
+    drawThumbnail(thumb.firstElementChild, project, { width, color: palette().fg })
   }
 
   /**

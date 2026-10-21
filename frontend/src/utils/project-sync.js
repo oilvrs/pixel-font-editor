@@ -26,6 +26,18 @@ const SYNC_DELAY_MS = 1500
 const KEEPALIVE_LIMIT = 60000 // Requests that outlive the page may not be larger than 64 KB
 const MAX_CONFLICTS = 3
 
+// The saves that are running, so that a page can wait for them.
+const running = new Set()
+
+/**
+ * Waits until every save that is running has finished. It does not wait for
+ * a save that is waiting to try again.
+ * @returns {Promise<void>}
+ */
+export async function whenAllSynced() {
+  await Promise.allSettled([...running])
+}
+
 export class ProjectSync {
   /**
    * @param {Object} options
@@ -191,11 +203,15 @@ export class ProjectSync {
       return this.running
     }
 
-    this.running = this.loop(keepalive).finally(() => {
+    const promise = this.loop(keepalive).finally(() => {
       this.running = null
+      running.delete(promise)
     })
 
-    return this.running
+    this.running = promise
+    running.add(promise)
+
+    return promise
   }
 
   /**

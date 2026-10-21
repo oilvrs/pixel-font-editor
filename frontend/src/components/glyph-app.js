@@ -13,6 +13,7 @@ import { parseRoute, resolveRoute, routeToHash } from '../core/route.js'
 import * as api from '../utils/api.js'
 import { clearSession, getSession, saveSession } from '../utils/session.js'
 import { canAnimate, getTheme, toggleTheme } from '../utils/theme.js'
+import { whenAllSynced } from '../utils/project-sync.js'
 
 class GlyphApp extends HTMLElement {
   /**
@@ -229,6 +230,8 @@ class GlyphApp extends HTMLElement {
     view.refresh()
 
     try {
+      // The editor may have a save on its way. The list should show it.
+      await whenAllSynced()
       this.projects = await api.getProjects()
     } catch (error) {
       // A 401 is handled by the session-expired event.

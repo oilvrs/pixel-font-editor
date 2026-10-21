@@ -80,7 +80,7 @@ class GlyphNew extends HTMLElement {
         form {
           display: flex;
           gap: 0.4rem;
-          font-weight:600;
+          font-weight:400;
         }
 
         input,

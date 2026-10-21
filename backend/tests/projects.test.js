@@ -134,6 +134,84 @@ describe("POST /api/v1/projects", () => {
 });
 
 describe("GET /api/v1/projects", () => {
+  describe("GET /api/v1/projects: previews", () => {
+    it("includes the glyphs the thumbnails are set in, for each project", async () => {
+      const first = await createProject(oliver, { name: "First", gridSize: 8 });
+      const second = await createProject(oliver, {
+        name: "Second",
+        gridSize: 16,
+      });
+      const shapes = [{ type: "rect", cx: 1, cy: 1, w: 2, h: 2, angle: 0 }];
+
+      await GlyphModel.create([
+        {
+          project: first.body.id,
+          char: "A",
+          bits: "AAAAAAAAAAA=",
+          shapes,
+          spacing: { left: 128, right: null },
+        },
+        { project: first.body.id, char: 'a', bits: 'AAAAAAAAAAA=' },
+        { project: first.body.id, char: "b", bits: "AAAAAAAAAAA=" },
+        { project: first.body.id, char: "C", bits: "AAAAAAAAAAA=" },
+        { project: second.body.id, char: "B", bits: "AAAA" },
+      ]);
+
+      const res = await request(app).get("/api/v1/projects").set(as(oliver));
+      const byName = Object.fromEntries(
+        res.body.map((project) => [project.name, project]),
+      );
+
+      expect(Object.keys(byName.First.preview).sort()).toEqual(['A', 'a', 'b']);
+      expect(byName.First.preview.A).toEqual({
+        size: 8,
+        bits: "AAAAAAAAAAA=",
+        shapes,
+        spacing: { left: 128, right: null },
+      });
+      expect(byName.First.preview.b).toEqual({
+        size: 8,
+        bits: "AAAAAAAAAAA=",
+        shapes: [],
+        spacing: { left: null, right: null },
+      });
+      expect(Object.keys(byName.Second.preview)).toEqual(["B"]);
+      expect(byName.Second.preview.B.size).toBe(16);
+    });
+
+    it("has an empty preview for a project without those glyphs", async () => {
+      const { body } = await createProject(oliver);
+      await GlyphModel.create({ project: body.id, char: "C", bits: "AAAA" });
+
+      const res = await request(app).get("/api/v1/projects").set(as(oliver));
+
+      expect(res.body[0].preview).toEqual({});
+    });
+
+    it("does not include the glyphs of other users", async () => {
+      const mine = await createProject(oliver);
+      const theirs = await createProject(anna);
+      await GlyphModel.create({
+        project: theirs.body.id,
+        char: "A",
+        bits: "AAAA",
+      });
+
+      const res = await request(app).get("/api/v1/projects").set(as(oliver));
+
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].id).toBe(mine.body.id);
+      expect(res.body[0].preview).toEqual({});
+    });
+
+    it("returns an empty list when the user has no projects", async () => {
+      const res = await request(app).get("/api/v1/projects").set(as(oliver));
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+  });
+
   it("lists only the user's own projects, newest change first, without glyph data", async () => {
     const first = await createProject(oliver, { name: "First" });
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -163,6 +241,7 @@ describe("GET /api/v1/projects", () => {
       revision: 0,
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
+      preview: {},
     });
   });
 });
