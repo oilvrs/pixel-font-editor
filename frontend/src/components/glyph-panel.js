@@ -164,6 +164,47 @@ class GlyphPanel extends HTMLElement {
         .copying .cell:hover {
           background: var(--green);
         }
+        /* Mobile layout */
+        @media (max-width: 1100px) {
+          :host {
+            position: fixed;
+            top: auto;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 40;
+            width: auto;
+            height: min(72vh, 36rem);
+            height: min(72dvh, 36rem);
+            padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+            border-right: 0;
+            border-top: 1px solid var(--fg);
+            transition: transform 0.35s var(--ease), visibility 0s;
+          }
+
+          :host([hidden]) {
+            display: block;
+            visibility: hidden;
+            transform: translateY(100%);
+            transition: transform 0.35s var(--ease), visibility 0s 0.35s;
+          }
+
+          .close {
+            min-height: 44px;
+          }
+
+          .cells {
+            gap: 0.5rem;
+          }
+        }
+
+        @media (hover: none) {
+          button:hover:not(.active):not(.cell) {
+            background: transparent;
+            color: var(--fg);
+          }
+        }
+
       </style>
 
             <div class="head">

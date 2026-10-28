@@ -124,6 +124,33 @@ class GlyphPreview extends HTMLElement {
           display: block;
           cursor: pointer;
         }
+        /* Mobile layout */
+        @media (max-width: 1100px) {
+          .hint {
+            display: none;
+          }
+
+          textarea {
+            font-size: 1rem;
+          }
+
+          button {
+            min-width: 44px;
+            min-height: 44px;
+          }
+
+          .view {
+            padding: 0.5rem;
+          }
+        }
+
+        @media (hover: none) {
+          button:hover:not(.active) {
+            background: transparent;
+            color: var(--fg);
+          }
+        }
+
       </style>
 
       <div class="head">
@@ -156,9 +183,7 @@ class GlyphPreview extends HTMLElement {
 
     this.shadowRoot.getElementById('zoomOutBtn').addEventListener('click', () => this.zoom(-1))
     this.shadowRoot.getElementById('zoomInBtn').addEventListener('click', () => this.zoom(1))
-    this.shadowRoot
-      .getElementById('canvas')
-      .addEventListener('pointerdown', (e) => this.onPointerDown(e))
+    this.shadowRoot.getElementById('canvas').addEventListener('click', (e) => this.onPointerDown(e))
   }
 
   /**

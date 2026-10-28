@@ -1,20 +1,25 @@
 /**
- * Bar above the drawing area: tools, the shapes menu and brush size.
+ * Bar above the drawing area: tools, undo and redo, brush size, zoom, the
+ * shapes menu and actions for the selection.
  * Stateless: everything shown is set through attributes, and user actions
  * are sent as events.
  *
- * Attributes: tool, shape, guides, brush
+ * Attributes: tool, shape, guides, brush, zoom, selection ('none', 'selected'
+ * or 'floating'), can-undo, can-redo ('yes' or 'no')
  *
  * Events:
- * - tool-change { tool: 'pen' | 'eraser' | 'select' | 'shapes' }
+ * - tool-change { tool: 'pen' | 'eraser' | 'select' | 'shapes' | 'pan' }
  * - shape-change { shape: 'rect' | 'ellipse' | 'quarter' | 'concave' | 'triangle' }
  * - brush-step { delta: 1 | -1 }
  * - guides-toggle
  * - zoom-step { delta: 1 | -1 }
  * - zoom-fit
  * - clear
+ * - undo
+ * - redo
+ * - selection-action { action: 'rotate' | 'copy' | 'paste' | 'delete' | 'place' | 'cancel' }
  *
- * @version 0.7.0
+ * @version 0.8.0
  */
 
 const SHAPES = [
@@ -27,7 +32,7 @@ const SHAPES = [
 
 class GlyphToolbar extends HTMLElement {
   static get observedAttributes() {
-    return ['tool', 'shape', 'guides', 'brush', 'zoom']
+    return ['tool', 'shape', 'guides', 'brush', 'zoom', 'selection', 'can-undo', 'can-redo']
   }
 
   constructor() {
@@ -82,8 +87,20 @@ class GlyphToolbar extends HTMLElement {
           padding: 0.9rem 0;
         }
 
+        .row {
+          display: contents;
+        }
+
+        .group {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+        }
+
+        .selection,
         .shapes {
           display: flex;
+          flex-wrap: wrap;
           align-items: center;
           justify-content: center;
           gap: 0.5rem;
@@ -91,14 +108,13 @@ class GlyphToolbar extends HTMLElement {
           border-top: 1px solid var(--fg);
         }
 
-        .shapes.hidden {
-          display: none;
+        .hidden,
+        [hidden] {
+          display: none !important;
         }
 
-        .group {
-          display: flex;
-          align-items: center;
-          gap: 0.6rem;
+        .compact-only {
+          display: none;
         }
 
         .label {
@@ -122,12 +138,24 @@ class GlyphToolbar extends HTMLElement {
           cursor: pointer;
           font-size: 0.85rem;
           font-family: inherit;
-          transition: background 0.2s, color 0.2s;
+          transition: background 0.2s, color 0.2s, opacity 0.2s;
         }
 
-        button:hover {
+        button:disabled {
+          opacity: 0.35;
+          cursor: default;
+        }
+
+        button:active:not(:disabled) {
           background: var(--fg);
           color: var(--bg);
+        }
+
+        @media (hover: hover) {
+          button:hover:not(:disabled):not(.active) {
+            background: var(--fg);
+            color: var(--bg);
+          }
         }
 
         button.active {
@@ -144,6 +172,69 @@ class GlyphToolbar extends HTMLElement {
         button.shape svg {
           fill: currentColor;
         }
+
+        /* Mobile layout: the bar is a few full-width rows of large buttons */
+        @media (max-width: 1100px) {
+          .frame {
+            border: 0;
+            margin-bottom: 0;
+          }
+
+          .bar {
+            flex-direction: column;
+            flex-wrap: nowrap;
+            align-items: stretch;
+            gap: 0.5rem;
+            padding: 0;
+          }
+
+          .row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+          }
+
+          .row > .group {
+            flex: 1 1 11rem;
+          }
+
+          .group {
+            gap: 0.4rem;
+          }
+
+          .group button,
+          .selection button,
+          .shapes button {
+            flex: 1 1 0;
+            min-width: 0;
+            min-height: 44px;
+            padding: 0.5rem 0.3rem;
+          }
+
+          .label {
+            display: none;
+          }
+
+          .compact-only {
+            display: inline-block;
+          }
+
+          .value {
+            flex: 0 0 auto;
+            min-width: 2.6rem;
+          }
+
+          .selection,
+          .shapes {
+            gap: 0.4rem;
+            padding: 0.5rem 0 0;
+            border-top: 0;
+          }
+
+          button.shape {
+            padding: 0.45rem 0.3rem;
+          }
+        }
       </style>
 
       <div class="frame">
@@ -154,22 +245,37 @@ class GlyphToolbar extends HTMLElement {
             <button data-tool="eraser" title="eraser (E)">eraser</button>
             <button data-tool="select" title="select (M)">select</button>
             <button data-tool="shapes" title="shapes (S)">shapes</button>
+            <button data-tool="pan" class="compact-only" title="move the view (H)">pan</button>
+          </div>
+          <div class="group">
+            <button id="undoBtn" title="undo (⌘Z)">undo</button>
+            <button id="redoBtn" title="redo (⌘⇧Z)">redo</button>
             <button id="clearBtn">clear</button>
             <button id="guidesBtn">guides</button>
           </div>
-          <div class="group">
-            <span class="label">brush:</span>
-            <button id="brushDownBtn" title="smaller ( [ or - )">−</button>
-            <span class="value" id="brushValue">1 px</span>
-            <button id="brushUpBtn" title="larger ( ] or + )">+</button>
-          </div>
+          <div class="row">
             <div class="group">
-            <span class="label">zoom:</span>
-            <button id="zoomOutBtn" title="smaller canvas (⌘ or ctrl + scroll)">−</button>
-            <span class="value" id="zoomValue">100%</span>
-            <button id="zoomInBtn" title="larger canvas">+</button>
-            <button id="zoomFitBtn" title="fit the canvas to the window (F)">fit</button>
+              <span class="label">brush:</span>
+              <button id="brushDownBtn" title="smaller ( [ or - )">−</button>
+              <span class="value" id="brushValue">1 px</span>
+              <button id="brushUpBtn" title="larger ( ] or + )">+</button>
+            </div>
+            <div class="group">
+              <span class="label">zoom:</span>
+              <button id="zoomOutBtn" title="smaller canvas (⌘ or ctrl + scroll)">−</button>
+              <span class="value" id="zoomValue">100%</span>
+              <button id="zoomInBtn" title="larger canvas">+</button>
+              <button id="zoomFitBtn" title="fit the canvas to the window (F)">fit</button>
+            </div>
           </div>
+        </div>
+        <div class="selection hidden" id="selectionRow">
+          <button data-action="rotate" title="rotate 90° (R)">rotate</button>
+          <button data-action="copy" title="copy (⌘C)">copy</button>
+          <button data-action="paste" title="paste (⌘V)">paste</button>
+          <button data-action="delete" title="delete (backspace)">delete</button>
+          <button data-action="place" id="placeBtn" title="place (enter)">place</button>
+          <button data-action="cancel" id="cancelBtn" title="cancel (esc)">deselect</button>
         </div>
         <div class="shapes hidden" id="shapeRow">${shapeButtons}</div>
       </div>
@@ -190,6 +296,14 @@ class GlyphToolbar extends HTMLElement {
       btn.addEventListener('click', () => this.emit('shape-change', { shape: btn.dataset.shape }))
     })
 
+    this.shadowRoot.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        this.emit('selection-action', { action: btn.dataset.action })
+      )
+    })
+
+    byId('undoBtn').addEventListener('click', () => this.emit('undo'))
+    byId('redoBtn').addEventListener('click', () => this.emit('redo'))
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
     byId('brushUpBtn').addEventListener('click', () => this.emit('brush-step', { delta: 1 }))
     byId('clearBtn').addEventListener('click', () => this.emit('clear'))
@@ -210,7 +324,8 @@ class GlyphToolbar extends HTMLElement {
 
   /**
    * Marks the buttons that match the current attributes, shows the shapes
-   * menu while the shapes tool is active and shows the brush size.
+   * menu while the shapes tool is active, the actions while something is
+   * selected, and the brush size.
    */
   updateActive() {
     const byId = (id) => this.shadowRoot.getElementById(id)
@@ -218,6 +333,7 @@ class GlyphToolbar extends HTMLElement {
 
     const tool = this.getAttribute('tool')
     const shape = this.getAttribute('shape')
+    const selection = this.getAttribute('selection') || 'none'
 
     this.shadowRoot.querySelectorAll('[data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === tool)
@@ -228,6 +344,11 @@ class GlyphToolbar extends HTMLElement {
     })
 
     byId('shapeRow').classList.toggle('hidden', tool !== 'shapes')
+    byId('selectionRow').classList.toggle('hidden', selection === 'none')
+    byId('placeBtn').hidden = selection !== 'floating'
+    byId('cancelBtn').textContent = selection === 'floating' ? 'cancel' : 'deselect'
+    byId('undoBtn').disabled = this.getAttribute('can-undo') !== 'yes'
+    byId('redoBtn').disabled = this.getAttribute('can-redo') !== 'yes'
     byId('guidesBtn').classList.toggle('active', this.getAttribute('guides') === 'on')
     byId('zoomValue').textContent = this.getAttribute('zoom') || '100%'
     byId('brushValue').textContent = `${this.getAttribute('brush') || 1} px`

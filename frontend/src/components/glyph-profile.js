@@ -275,6 +275,54 @@ class GlyphProfile extends HTMLElement {
             transition: none !important;
           }
         }
+        /* Mobile layout */
+        @media (max-width: 40rem) {
+          .page {
+            padding: 1.5rem 1rem 4rem;
+          }
+
+          .grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.9rem;
+          }
+
+          .card {
+            padding: 10px 10px 30px;
+          }
+
+          .actions {
+            left: 10px;
+            right: 10px;
+            height: 30px;
+          }
+
+          .paper {
+            padding: 0.6rem;
+          }
+
+          .name {
+            font-size: 0.85rem;
+          }
+        }
+
+        @media (pointer: coarse) {
+          .tool {
+            padding: 0.6rem 0.9rem;
+          }
+        }
+
+        @media (hover: none) {
+          .card:hover {
+            transform: none;
+            box-shadow: none;
+          }
+
+          .tool:hover {
+            background: transparent;
+            color: var(--fg);
+          }
+        }
+
       </style>
       <div class="page">
         <div class="title-row">

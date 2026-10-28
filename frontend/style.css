@@ -110,3 +110,29 @@ glyph-header {
     animation: none !important;
   }
 }
+
+/* Mobile layout */
+@media (max-width: 40rem) {
+  :root {
+    --header-h: 3.25rem;
+    --fs-title: 1.8rem;
+    --fs-heading: 1.25rem;
+    --fs-nav: 1.05rem;
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* No double-tap zoom. Pinch zoom stays. */
+}
+
+body {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+glyph-app {
+  min-height: 100dvh;
+}

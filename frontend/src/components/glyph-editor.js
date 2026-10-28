@@ -111,9 +111,15 @@ const HANDLES = [
   [-1, 0],
 ]
 
-const HANDLE_DRAW_CSS = 8 // Drawn handle size, CSS px
-const ROTATE_ZONE_CSS = 18 // How far outside a corner a drag rotates, CSS px
-const MIN_EDGE_HANDLE_CSS = 16 // Edge handles are left out on sides shorter than this, CSS px
+// A finger needs bigger targets than a mouse pointer.
+const COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches
+const HANDLE_DRAW_CSS = COARSE_POINTER ? 14 : 8 // Drawn handle size, CSS px
+const HANDLE_HIT_CSS = COARSE_POINTER ? 16 : 7 // Largest distance from a handle that still grabs it, CSS px
+const ROTATE_ZONE_CSS = COARSE_POINTER ? 34 : 18 // How far outside a corner a drag rotates, CSS px
+const MIN_EDGE_HANDLE_CSS = COARSE_POINTER ? 36 : 16 // Edge handles are left out on sides shorter than this, CSS px
+
+// The single column layout. Must match the media queries in render() and in the components.
+const COMPACT_QUERY = '(max-width: 1100px)'
 
 /**
  * Limits a number to a range.
@@ -191,7 +197,11 @@ class GlyphEditor extends HTMLElement {
     this.cellSizes = {} // size -> on-screen size of one cell in CSS px, loaded on first use
     this.wheelAccum = 0 // Collects small scroll steps, so a pinch does not zoom wildly
     this.currentChar = 'A' // The glyph being drawn
-    this.panelOpen = loadPanelOpen() // The glyph sidebar is open by default and remembers its state
+    this.compactQuery = window.matchMedia(COMPACT_QUERY) // True on phones and small tablets: one column
+    this.userZoomed = false // On a small screen the canvas fits the screen until the user zooms
+    this.autoCell = null // The fitted cell size, until the layout changes
+    this.panDrag = null // { x, y, left, top } while the view is moved with the pan tool
+    this.panelOpen = this.compactQuery.matches ? false : loadPanelOpen() // The glyph list is a sheet on a small screen, and starts closed there
     this.copyMode = false // The next glyph picked in the panel receives a copy of the current drawing
     this.tool = 'pen' // 'pen', 'eraser', 'select' or 'shapes'
     this.shapeType = 'rect' // The shape the shapes tool places
@@ -231,6 +241,7 @@ class GlyphEditor extends HTMLElement {
     this.onKeyDown = this.onKeyDown.bind(this)
     this.onResize = this.onResize.bind(this)
     this.onPageHide = this.onPageHide.bind(this)
+    this.onLayoutChange = this.onLayoutChange.bind(this)
     this.onThemeChange = this.onThemeChange.bind(this)
   }
 
@@ -413,6 +424,12 @@ class GlyphEditor extends HTMLElement {
    * @returns {number}
    */
   cellSizeFor(size) {
+    // On a small screen the canvas fits the screen, until the user zooms.
+    if (this.compact && !this.userZoomed) {
+      if (this.autoCell === null) this.autoCell = this.clampCell(size, this.fitCellPx(size))
+      return this.autoCell
+    }
+
     if (this.cellSizes[size] === undefined) {
       const saved = loadCellSize(size)
       this.cellSizes[size] = this.clampCell(size, saved === null ? CELL_PX[size] : saved)
@@ -470,6 +487,7 @@ class GlyphEditor extends HTMLElement {
     document.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('pagehide', this.onPageHide)
+    this.compactQuery.removeEventListener('change', this.onLayoutChange)
     window.removeEventListener('theme-change', this.onThemeChange)
 
     if (this.sync) {
@@ -612,6 +630,7 @@ class GlyphEditor extends HTMLElement {
     document.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('pagehide', this.onPageHide)
+    this.compactQuery.removeEventListener('change', this.onLayoutChange)
     window.removeEventListener('theme-change', this.onThemeChange)
   }
 
@@ -767,6 +786,22 @@ class GlyphEditor extends HTMLElement {
 
     settings.setAttribute('save-state', state)
     settings.setAttribute('save-status', texts[state] || state)
+
+    const bar = this.shadowRoot.getElementById('gbStatus')
+
+    if (bar) {
+      const short = {
+        saved: 'saved',
+        saving: 'saving…',
+        unsaved: 'unsaved changes',
+        offline: 'offline: will try again',
+        conflict: 'changed elsewhere',
+        error: 'not saved',
+      }
+
+      bar.textContent = short[state] || state
+      bar.dataset.state = state
+    }
   }
 
   /**
@@ -857,11 +892,138 @@ class GlyphEditor extends HTMLElement {
          glyph-spacing {
           margin-top: 1.5rem;
         }
+
+                .glyphbar,
+        .scrim {
+          display: none;
+        }
+
+        /* Mobile layout: one column, the tools under the canvas */
+        @media (max-width: 1100px) {
+          .layout {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .main {
+            display: flex;
+            flex-direction: column;
+            max-width: none;
+            margin: 0;
+            padding: 0.75rem 0.75rem 1.25rem;
+          }
+
+          .glyphbar {
+            order: 0;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem;
+            margin-bottom: 0.6rem;
+          }
+
+          .glyphbar button {
+            min-width: 44px;
+            min-height: 44px;
+            border: 1px solid var(--fg);
+            background: transparent;
+            color: var(--fg);
+            font-family: inherit;
+            font-size: 1.3rem;
+            cursor: pointer;
+          }
+
+          .glyphbar button:active {
+            background: var(--fg);
+            color: var(--bg);
+          }
+
+          #gbOpen {
+            display: flex;
+            flex: 1;
+            align-items: baseline;
+            justify-content: center;
+            gap: 0.6rem;
+          }
+
+          #gbName {
+            color: var(--muted);
+            font-size: 0.8rem;
+          }
+
+          .gbstatus {
+            flex: 1 0 100%;
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-align: center;
+          }
+
+          .gbstatus[data-state='offline'],
+          .gbstatus[data-state='conflict'],
+          .gbstatus[data-state='error'] {
+            color: #c0392b;
+          }
+
+          .stage {
+            order: 1;
+            max-height: calc(100vh - var(--header-h) - 9rem);
+            max-height: calc(100dvh - var(--header-h) - 9rem);
+            overscroll-behavior: contain;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+          }
+
+          glyph-toolbar {
+            order: 2;
+            margin-top: 0.75rem;
+          }
+
+          .legend {
+            display: none;
+          }
+
+          .notice {
+            order: 4;
+          }
+
+          glyph-preview {
+            order: 5;
+          }
+
+          glyph-spacing {
+            order: 6;
+          }
+
+          .scrim {
+            display: block;
+            position: fixed;
+            inset: 0;
+            z-index: 30;
+            background: rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s var(--ease);
+          }
+
+          .scrim.on {
+            opacity: 1;
+            pointer-events: auto;
+          }
+        }
       </style>
 
-      <div class="layout">
+            <div class="layout">
+        <div class="scrim" id="scrim"></div>
         <glyph-panel ${this.panelOpen ? '' : 'hidden'}></glyph-panel>
         <div class="main">
+          <div class="glyphbar">
+            <button id="gbPrev" aria-label="previous glyph">‹</button>
+            <button id="gbOpen" aria-label="show all glyphs"><span id="gbChar"></span><span id="gbName"></span></button>
+            <button id="gbNext" aria-label="next glyph">›</button>
+            <span class="gbstatus" id="gbStatus"></span>
+          </div>
           <glyph-toolbar
             tool="${this.tool}"
             shape="${this.shapeType}"
@@ -900,8 +1062,13 @@ class GlyphEditor extends HTMLElement {
 
     canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e))
     canvas.addEventListener('pointermove', (e) => this.onPointerMove(e))
-    canvas.addEventListener('pointerup', () => this.endDrag())
-    canvas.addEventListener('pointercancel', () => this.endDrag())
+    // Only the first finger draws. A second finger that touches the screen is ignored.
+    canvas.addEventListener('pointerup', (e) => {
+      if (e.isPrimary) this.endDrag()
+    })
+    canvas.addEventListener('pointercancel', (e) => {
+      if (e.isPrimary) this.endDrag()
+    })
     canvas.addEventListener('pointerleave', () => this.onPointerLeave())
     canvas.addEventListener('contextmenu', (e) => e.preventDefault()) // Right click is the eraser
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
@@ -913,6 +1080,16 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('zoom-fit', () => this.fitZoom())
     toolbar.addEventListener('clear', () => this.clear())
     toolbar.addEventListener('guides-toggle', () => this.toggleGuides())
+
+    toolbar.addEventListener('undo', () => this.undo())
+    toolbar.addEventListener('redo', () => this.redo())
+    toolbar.addEventListener('selection-action', (e) => this.selectionAction(e.detail.action))
+
+    const root = this.shadowRoot
+    root.getElementById('gbPrev').addEventListener('click', () => this.stepGlyph(-1))
+    root.getElementById('gbNext').addEventListener('click', () => this.stepGlyph(1))
+    root.getElementById('gbOpen').addEventListener('click', () => this.togglePanel(true))
+    root.getElementById('scrim').addEventListener('click', () => this.togglePanel(false))
 
     settings.addEventListener('glyph-step', (e) => this.stepGlyph(e.detail.delta))
     settings.addEventListener('panel-toggle', () => this.togglePanel())
@@ -936,6 +1113,7 @@ class GlyphEditor extends HTMLElement {
     document.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('resize', this.onResize) // Browser zoom changes the pixel density
     window.addEventListener('pagehide', this.onPageHide) // Save before the page goes away
+    this.compactQuery.addEventListener('change', this.onLayoutChange)
     window.addEventListener('theme-change', this.onThemeChange)
   }
 
@@ -1014,6 +1192,8 @@ class GlyphEditor extends HTMLElement {
       this.setTool('select')
     } else if (key === 's') {
       this.setTool('shapes')
+    } else if (key === 'h') {
+      this.setTool('pan')
     } else if (key === 'r') {
       this.rotateSelected(e.shiftKey ? -1 : 1)
     } else if (key === 'f') {
@@ -1029,13 +1209,105 @@ class GlyphEditor extends HTMLElement {
       this.preview.focusText()
     }
   }
+  /**
+   * Whether the single column layout is used: phones and small tablets.
+   * @returns {boolean}
+   */
+  get compact() {
+    return this.compactQuery.matches
+  }
 
   /**
-   * Redraws when the window or browser zoom changes. The cell size is
-   * checked again, since the allowed maximum depends on the pixel density.
+   * The cell size, in CSS px, that makes the whole canvas fit the screen.
+   * @param {number} size - grid size
+   * @returns {number}
    */
-  onResize() {
+  fitCellPx(size) {
+    const stage = this.shadowRoot.querySelector('.stage')
+    const header = document.querySelector('glyph-header')
+    const width = ((stage && stage.clientWidth) || window.innerWidth) - 2
+    const landscape = window.innerWidth > window.innerHeight
+
+    // A screen held sideways is low, so the canvas also has to fit the height.
+    const height = window.innerHeight - (header ? header.offsetHeight : 0) - 150
+    const space = landscape ? Math.min(width, Math.max(height, 240)) : width
+
+    return Math.floor(space / size)
+  }
+
+  /**
+   * Called when the screen changes between the one column and the three
+   * column layout, for example when a tablet is turned.
+   */
+  onLayoutChange() {
+    if (!this.sync) return
+
+    this.panelOpen = this.compact ? false : loadPanelOpen()
+    this.userZoomed = false
+    this.autoCell = null
     this.cellSizes = {}
+    this.panel.hidden = !this.panelOpen
+
+    this.showScrim()
+    this.syncToolbar()
+    this.updateZoomLabel()
+    this.draw()
+  }
+
+  /**
+   * Shows the dark area behind the glyph sheet while it is open.
+   */
+  showScrim() {
+    this.shadowRoot.getElementById('scrim').classList.toggle('on', this.compact && this.panelOpen)
+  }
+
+  /**
+   * Does what the buttons for the selection ask for.
+   * @param {string} action - 'rotate', 'copy', 'paste', 'delete', 'place' or 'cancel'
+   */
+  selectionAction(action) {
+    if (action === 'rotate') {
+      this.rotateSelected(1)
+    } else if (action === 'delete') {
+      this.deleteSelected()
+    } else if (action === 'copy') {
+      if (this.copySelection()) this.flash('copied')
+    } else if (action === 'paste') {
+      if (!this.paste()) this.flash('nothing to paste')
+    } else if (action === 'place') {
+      this.commitFloating()
+    } else if (action === 'cancel') {
+      if (this.floating) this.cancelFloating()
+      else this.clearSelection()
+    }
+  }
+
+  /**
+   * Tells the toolbar whether something is selected, and whether undo and redo
+   * have anything to do. Attributes are only set when the value changes.
+   */
+  syncToolbarState() {
+    const toolbar = this.toolbar
+    const { history } = this.session
+
+    let selection = 'none'
+    if (this.floating) selection = 'floating'
+    else if (this.selection || this.selectedShapes.length > 0) selection = 'selected'
+
+    const values = {
+      selection,
+      'can-undo': history.past.length > 0 || this.floating ? 'yes' : 'no',
+      'can-redo': history.future.length > 0 && !this.floating ? 'yes' : 'no',
+    }
+
+    for (const [name, value] of Object.entries(values)) {
+      if (toolbar.getAttribute(name) !== value) toolbar.setAttribute(name, value)
+    }
+  }
+
+  onResize() {
+    this.autoCell = null
+    if (!this.userZoomed) this.cellSizes = {}
     this.updateZoomLabel()
     this.draw()
   }
@@ -1092,6 +1364,14 @@ class GlyphEditor extends HTMLElement {
    * Fits the canvas to the space in the window, in width and height.
    */
   fitZoom() {
+    if (this.compact) {
+      this.userZoomed = false
+      this.autoCell = null
+      this.updateZoomLabel()
+      this.draw()
+      return
+    }
+
     const stage = this.shadowRoot.querySelector('.stage')
     const space = Math.min(
       stage.clientWidth - 2,
@@ -1109,7 +1389,10 @@ class GlyphEditor extends HTMLElement {
     const next = this.clampCell(this.size, px)
 
     this.cellSizes[this.size] = next
-    saveCellSize(this.size, next)
+
+    // A zoom on a small screen is not saved, so it does not change the zoom on a large one.
+    if (this.compact) this.userZoomed = true
+    else saveCellSize(this.size, next)
 
     this.updateZoomLabel()
     this.draw()
@@ -1378,7 +1661,7 @@ class GlyphEditor extends HTMLElement {
     const local = toLocal(frame, point.x, point.y)
     const halfW = Math.abs(frame.w) / 2
     const halfH = Math.abs(frame.h) / 2
-    const radius = clamp((Math.min(halfW, halfH) * 2 * css) / 3, 2, 7)
+    const radius = clamp((Math.min(halfW, halfH) * 2 * css) / 3, 2, HANDLE_HIT_CSS)
 
     for (const [hx, hy] of visibleHandles(frame, css)) {
       const dx = (local.x - hx * halfW) * css
@@ -1458,13 +1741,23 @@ class GlyphEditor extends HTMLElement {
    * @param {PointerEvent} e
    */
   onPointerDown(e) {
-    if (e.button === 1) return // Ignore middle click
+    if (e.button === 1 || !e.isPrimary) return // Ignore middle click and extra fingers
 
     e.preventDefault()
     this.preview.blurText() // Shortcuts work again after typing in the text preview
     this.settings.blurInputs()
     this.spacingPanel.blurInputs()
     e.currentTarget.setPointerCapture(e.pointerId) // Keeps the drag going outside the canvas
+
+    // The pan tool moves the view instead of drawing. A finger on the canvas cannot scroll it.
+    if (this.tool === 'pan') {
+      const stage = this.shadowRoot.querySelector('.stage')
+
+      this.dragMode = 'pan'
+      this.panDrag = { x: e.clientX, y: e.clientY, left: stage.scrollLeft, top: stage.scrollTop }
+      this.updateCursor()
+      return
+    }
 
     const point = this.pointFromEvent(e)
     const cell = this.cellOf(point)
@@ -1551,6 +1844,16 @@ class GlyphEditor extends HTMLElement {
    * @param {PointerEvent} e
    */
   onPointerMove(e) {
+    if (!e.isPrimary) return
+
+    if (this.dragMode === 'pan') {
+      const stage = this.shadowRoot.querySelector('.stage')
+
+      stage.scrollLeft = this.panDrag.left - (e.clientX - this.panDrag.x)
+      stage.scrollTop = this.panDrag.top - (e.clientY - this.panDrag.y)
+      return
+    }
+
     const point = this.pointFromEvent(e)
     const cell = this.cellOf(point)
     this.hoverPoint = point
@@ -1657,6 +1960,7 @@ class GlyphEditor extends HTMLElement {
     this.liftStart = null
     this.liftPoint = null
     this.dragStart = null
+    this.panDrag = null
     this.updateNotice()
     this.draw()
   }
@@ -2033,7 +2337,7 @@ class GlyphEditor extends HTMLElement {
     this.commitFloating()
     this.tool = tool
 
-    if (tool !== 'select' && tool !== 'shapes') this.selectedShapes = []
+    if (tool !== 'select' && tool !== 'shapes' && tool !== 'pan') this.selectedShapes = []
     if (tool === 'select' && this.selection) this.selectedShapes = this.shapesInside(this.selection)
 
     this.toolbar.setAttribute('tool', tool)
@@ -2130,6 +2434,10 @@ class GlyphEditor extends HTMLElement {
     settings.setAttribute('panel', this.panelOpen ? 'open' : 'closed')
     settings.setAttribute('copy', this.copyMode ? 'on' : 'off')
     settings.setAttribute('font-name', this.set.name)
+
+    const root = this.shadowRoot
+    root.getElementById('gbChar').textContent = this.currentChar
+    root.getElementById('gbName').textContent = glyphName(this.currentChar)
   }
 
   /**
@@ -2168,10 +2476,13 @@ class GlyphEditor extends HTMLElement {
   togglePanel(open = !this.panelOpen) {
     this.panelOpen = open
     this.panel.hidden = !open
-    savePanelOpen(open)
+
+    // A choice on a small screen should not change the choice on a large one.
+    if (!this.compact) savePanelOpen(open)
 
     if (!open && this.copyMode) this.copyMode = false
 
+    this.showScrim()
     this.syncToolbar()
     this.panel.highlight()
   }
@@ -2212,6 +2523,9 @@ class GlyphEditor extends HTMLElement {
   onGlyphPick(char) {
     if (this.copyMode) this.copyGlyphTo(char)
     else this.setGlyph(char)
+
+    // On a small screen the glyph list is a sheet that gets out of the way.
+    if (this.compact && !this.copyMode) this.togglePanel(false)
   }
 
   /**
@@ -2596,7 +2910,9 @@ class GlyphEditor extends HTMLElement {
     const canvas = this.shadowRoot.getElementById('canvas')
     let cursor = 'crosshair'
 
-    if (this.dragMode === 'move' || this.dragMode === 'liftpending') {
+    if (this.tool === 'pan') {
+      cursor = this.dragMode === 'pan' ? 'grabbing' : 'grab'
+    } else if (this.dragMode === 'move' || this.dragMode === 'liftpending') {
       cursor = 'move'
     } else if (this.dragMode === 'rotate') {
       cursor = 'grabbing'
@@ -2688,6 +3004,7 @@ class GlyphEditor extends HTMLElement {
     this.drawHover(view)
     this.updateCursor()
     this.updateNotice()
+    this.syncToolbarState()
   }
 
   /**

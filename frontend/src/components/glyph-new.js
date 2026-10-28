@@ -62,6 +62,8 @@ class GlyphNew extends HTMLElement {
           align-items: center;
           justify-content: center;
           min-height: calc(100vh - var(--header-h));
+          min-height: calc(100dvh - var(--header-h));
+          min-height: calc(100dvh - var(--header-h));
           padding: 0 1.5rem 18vh;
         }
 
@@ -177,6 +179,31 @@ class GlyphNew extends HTMLElement {
             transition: none !important;
           }
         }
+        /* Mobile layout */
+        @media (max-width: 30rem) {
+          form {
+            flex-wrap: wrap;
+          }
+
+          input {
+            flex: 1 1 100%;
+          }
+
+          select,
+          button {
+            flex: 1 1 0;
+            min-height: 48px;
+          }
+        }
+
+        @media (hover: none) {
+          select:hover:not(:disabled),
+          button:hover:not(:disabled) {
+            transform: none;
+            box-shadow: none;
+          }
+        }
+
       </style>
       <div class="page">
         <div class="box">

@@ -68,6 +68,8 @@ class GlyphLogin extends HTMLElement {
           align-items: center;
           justify-content: center;
           min-height: calc(100vh - var(--header-h));
+          min-height: calc(100dvh - var(--header-h));
+          min-height: calc(100dvh - var(--header-h));
           padding: 0 1.5rem 14vh;
         }
 
@@ -194,6 +196,24 @@ class GlyphLogin extends HTMLElement {
             transition: none !important;
           }
         }
+        /* Mobile layout */
+        @media (max-width: 30rem) {
+          .actions {
+            flex-wrap: wrap;
+          }
+
+          .submit {
+            min-height: 48px;
+          }
+        }
+
+        @media (hover: none) {
+          .submit:hover:not(:disabled) {
+            transform: none;
+            box-shadow: none;
+          }
+        }
+
       </style>
       <div class="page">
         <form class="box">

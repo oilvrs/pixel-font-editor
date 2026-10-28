@@ -50,7 +50,7 @@ export function createApp({
   app.use(createGeneralLimiter(generalLimit));
 
   // Enable Cross Origin Resource Sharing (CORS).
-  app.use(cors({ origin: CORS_ORIGIN }));
+  app.use(cors({ origin: CORS_ORIGIN.split(",").map((origin) => origin.trim()) }));
 
   // Parse requests of the content type application/json.
   // The limit is raised for saving many glyphs at once (step 2).

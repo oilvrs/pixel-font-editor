@@ -158,6 +158,22 @@ class GlyphHeader extends HTMLElement {
             transition: none !important;
           }
         }
+        /* Mobile layout */
+        @media (max-width: 40rem) {
+          .brand {
+            gap: 0.75rem;
+          }
+
+          .brand img {
+            width: 32px;
+            height: 32px;
+          }
+
+          nav {
+            font-size: 1.05rem;
+          }
+        }
+
       </style>
       <header>
         <a class="brand" href="#/new" aria-label="o_p_g + tools: new font">

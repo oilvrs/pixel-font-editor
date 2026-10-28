@@ -198,6 +198,38 @@ class GlyphSettings extends HTMLElement {
           color: var(--on-accent);
           border-color: var(--blue-ui);
         }
+        /* Mobile layout */
+        @media (max-width: 1100px) {
+          :host {
+            position: static;
+            width: auto;
+            height: auto;
+            overflow: visible;
+            border-left: 0;
+            border-top: 1px solid var(--fg);
+            padding: 1.25rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
+          }
+
+          button {
+            min-height: 44px;
+          }
+
+          input {
+            font-size: 1rem;
+          }
+
+          .hint {
+            display: none;
+          }
+        }
+
+        @media (hover: none) {
+          button:hover:not(.active) {
+            background: transparent;
+            color: var(--fg);
+          }
+        }
+
       </style>
 
            <section>

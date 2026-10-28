@@ -177,6 +177,44 @@ class GlyphSpacing extends HTMLElement {
           color: var(--muted);
           text-align: center;
         }
+        /* Mobile layout */
+        .steps {
+          display: none;
+        }
+
+        @media (max-width: 1100px) {
+          .card {
+            padding: 1rem;
+          }
+
+          .steps {
+            display: flex;
+            justify-content: center;
+            gap: 0.4rem;
+          }
+
+          .steps button {
+            min-width: 44px;
+            min-height: 44px;
+            border: 1px solid var(--fg);
+            border-radius: 0;
+            background: transparent;
+            color: var(--fg);
+            font-family: inherit;
+            font-size: 1.1rem;
+            cursor: pointer;
+          }
+
+          .steps button:active {
+            background: var(--fg);
+            color: var(--bg);
+          }
+
+          .reset {
+            min-height: 44px;
+          }
+        }
+
       </style>
 
       <p class="title">spacing</p>
@@ -190,7 +228,8 @@ class GlyphSpacing extends HTMLElement {
         <div class="middle">
           <div class="side">
             <label for="leftInput">left</label>
-            <input id="leftInput" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
+            <input id="leftInput" type="text" autocomplete="off" spellcheck="false" />
+            <div class="steps"><button type="button" data-step="left" data-dir="-1" aria-label="decrease left">−</button><button type="button" data-step="left" data-dir="1" aria-label="increase left">+</button></div>
             <button class="reset" id="leftReset" title="back to automatic">reset</button>
           </div>
 
@@ -203,13 +242,15 @@ class GlyphSpacing extends HTMLElement {
 
           <div class="side">
             <label for="rightInput">right</label>
-            <input id="rightInput" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
+            <input id="rightInput" type="text" autocomplete="off" spellcheck="false" />
+            <div class="steps"><button type="button" data-step="right" data-dir="-1" aria-label="decrease right">−</button><button type="button" data-step="right" data-dir="1" aria-label="increase right">+</button></div>
             <button class="reset" id="rightReset" title="back to automatic">reset</button>
           </div>
         </div>
 
         <div class="bottom">
-          <input id="widthInput" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
+          <input id="widthInput" type="text" autocomplete="off" spellcheck="false" />
+            <div class="steps"><button type="button" data-step="width" data-dir="-1" aria-label="decrease width">−</button><button type="button" data-step="width" data-dir="1" aria-label="increase width">+</button></div>
           <label for="widthInput">width</label>
         </div>
 
@@ -234,6 +275,12 @@ class GlyphSpacing extends HTMLElement {
 
     byId('leftReset').addEventListener('click', () => this.emit('left', null))
     byId('rightReset').addEventListener('click', () => this.emit('right', null))
+
+    this.shadowRoot.querySelectorAll('[data-step]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.step(button.dataset.step, Number(button.dataset.dir), false)
+      })
+    })
   }
 
   /**
@@ -253,17 +300,27 @@ class GlyphSpacing extends HTMLElement {
       input.blur()
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault()
-      if (!this.current) return
-
-      const typed = parseUnits(input.value)
-      const base = typed === undefined ? this.current[side] : typed
-      const step = e.shiftKey ? 1 : this.current.unit
-      const value = base + (e.key === 'ArrowUp' ? step : -step)
-
-      input.value = String(value)
-      this.values[side] = String(value)
-      this.emit(side, value)
+      this.step(side, e.key === 'ArrowUp' ? 1 : -1, e.shiftKey)
     }
+  }
+
+  /**
+   * Changes a value by one step: one pixel, or one unit when fine is true.
+   * @param {string} side - 'left', 'right' or 'width'
+   * @param {number} direction - 1 or -1
+   * @param {boolean} fine - one unit instead of one pixel
+   */
+  step(side, direction, fine) {
+    if (!this.current) return
+
+    const input = this.shadowRoot.getElementById(`${side}Input`)
+    const typed = parseUnits(input.value)
+    const base = typed === undefined ? this.current[side] : typed
+    const value = base + direction * (fine ? 1 : this.current.unit)
+
+    input.value = String(value)
+    this.values[side] = String(value)
+    this.emit(side, value)
   }
 
   /**
@@ -321,6 +378,10 @@ class GlyphSpacing extends HTMLElement {
 
     const { char, name, effective } = this.source()
     this.current = effective
+
+    root.querySelectorAll('[data-step]').forEach((button) => {
+      button.disabled = !effective
+    })
 
     root.getElementById('char').textContent = char
     root.getElementById('hex').textContent = char
