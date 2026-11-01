@@ -11,7 +11,7 @@
 import { isEmpty, serializeGrid, deserializeGrid } from './grid.js'
 import { SHAPE_TYPES, shapeBounds } from './shapes.js'
 
-export const MAX_SHAPES = 500
+export const MAX_SHAPES = 2000
 
 const MIN_SPACING = -4096
 const MAX_SPACING = 8192

@@ -18,6 +18,7 @@
  * - undo
  * - redo
  * - selection-action { action: 'rotate' | 'copy' | 'paste' | 'delete' | 'place' | 'cancel' }
+ * - replace-pixels
  *
  * @version 0.8.0
  */
@@ -173,6 +174,12 @@ class GlyphToolbar extends HTMLElement {
           fill: currentColor;
         }
 
+        .wide {
+          margin-left: 0.75rem;
+        }
+
+
+
         /* Mobile layout: the bar is a few full-width rows of large buttons */
         @media (max-width: 1100px) {
           .frame {
@@ -234,6 +241,11 @@ class GlyphToolbar extends HTMLElement {
           button.shape {
             padding: 0.45rem 0.3rem;
           }
+
+          .shapes .wide {
+            flex: 2 1 0;
+            margin-left: 0;
+          }
         }
       </style>
 
@@ -277,7 +289,10 @@ class GlyphToolbar extends HTMLElement {
           <button data-action="place" id="placeBtn" title="place (enter)">place</button>
           <button data-action="cancel" id="cancelBtn" title="cancel (esc)">deselect</button>
         </div>
-        <div class="shapes hidden" id="shapeRow">${shapeButtons}</div>
+                <div class="shapes hidden" id="shapeRow">
+          ${shapeButtons}
+          <button id="replaceBtn" class="wide" title="replace every pixel, or the pixels in the selection, with the chosen shape (one cell in size)">replace pixels</button>
+        </div>
       </div>
     `
   }
@@ -304,6 +319,7 @@ class GlyphToolbar extends HTMLElement {
 
     byId('undoBtn').addEventListener('click', () => this.emit('undo'))
     byId('redoBtn').addEventListener('click', () => this.emit('redo'))
+    byId('replaceBtn').addEventListener('click', () => this.emit('replace-pixels'))
     byId('brushDownBtn').addEventListener('click', () => this.emit('brush-step', { delta: -1 }))
     byId('brushUpBtn').addEventListener('click', () => this.emit('brush-step', { delta: 1 }))
     byId('clearBtn').addEventListener('click', () => this.emit('clear'))

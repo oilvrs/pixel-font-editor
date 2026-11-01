@@ -45,8 +45,10 @@ import {
   cloneSpacing,
   noSpacing,
   deserializeGlyph,
+  MAX_SHAPES,
 } from '../core/glyph.js'
 import { effectiveSpacing } from '../core/spacing.js'
+import { countPixels, pixelsToShapes } from '../core/pixel-shapes.js'
 import { buildSvg } from '../core/export-svg.js'
 import { buildUfo, safeFileName } from '../core/export-ufo.js'
 import { createZip } from '../core/zip.js'
@@ -1084,6 +1086,7 @@ class GlyphEditor extends HTMLElement {
     toolbar.addEventListener('undo', () => this.undo())
     toolbar.addEventListener('redo', () => this.redo())
     toolbar.addEventListener('selection-action', (e) => this.selectionAction(e.detail.action))
+    toolbar.addEventListener('replace-pixels', () => this.replacePixelsWithShapes())
 
     const root = this.shadowRoot
     root.getElementById('gbPrev').addEventListener('click', () => this.stepGlyph(-1))
@@ -2364,6 +2367,51 @@ class GlyphEditor extends HTMLElement {
     this.brushSize = clamp(this.brushSize + delta, 1, MAX_BRUSH)
     this.toolbar.setAttribute('brush', this.brushSize)
     this.draw()
+  }
+
+  /**
+   * Replaces every pixel with a shape that is one cell in size, using the shape
+   * that is chosen in the shapes menu. If there is a selection, only the pixels
+   * inside it are replaced. Shapes that are already there are kept. This is one
+   * undo step.
+   */
+  replacePixelsWithShapes() {
+    this.commitFloating()
+
+    const record = this.session
+    const region = this.selection
+    const count = countPixels(record.grid, region)
+
+    if (count === 0) {
+      this.flash(region ? 'no pixels in the selection' : 'no pixels to replace')
+      return
+    }
+
+    const total = record.shapes.length + count
+
+    if (total > MAX_SHAPES) {
+      this.flash(
+        `too many pixels: that would make ${total} shapes, and a glyph can have ${MAX_SHAPES}`
+      )
+      return
+    }
+
+    pushState(record.history, this.snapshot())
+
+    const shapes = pixelsToShapes(record.grid, this.shapeType, region)
+
+    if (region) clearRegion(record.grid, region.x, region.y, region.width, region.height)
+    else clearGrid(record.grid)
+
+    record.shapes.push(...shapes)
+
+    this.selection = null
+    this.selectedShapes = []
+
+    this.markChanged()
+    this.updateNotice()
+    this.draw()
+    this.flash(`replaced ${count} pixels with ${this.shapeType} shapes`)
   }
 
   /**
