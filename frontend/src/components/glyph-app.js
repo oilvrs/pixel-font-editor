@@ -13,6 +13,10 @@ import { parseRoute, resolveRoute, routeToHash } from '../core/route.js'
 import * as api from '../utils/api.js'
 import { clearSession, getSession, saveSession } from '../utils/session.js'
 import { canAnimate, getTheme, toggleTheme } from '../utils/theme.js'
+import { serializeGlyph } from '../core/glyph.js'
+import { summarizeImport } from '../core/ufo-import.js'
+import { defaultMargin } from '../metrics.js'
+import { readUfoFile } from '../utils/ufo-import.js'
 import { whenAllSynced } from '../utils/project-sync.js'
 
 class GlyphApp extends HTMLElement {
@@ -135,6 +139,7 @@ class GlyphApp extends HTMLElement {
 
     view.source = () => ({ busy: this.busy, error: this.error })
     view.addEventListener('project-create', (event) => this.createProject(event.detail))
+    view.addEventListener('project-import', (event) => this.importProject(event.detail))
 
     this.main.append(view)
     this.view = view
@@ -271,6 +276,48 @@ class GlyphApp extends HTMLElement {
   createProject(data) {
     return this.run(async () => {
       const project = await api.createProject(data)
+      window.location.hash = routeToHash({ name: 'editor', projectId: project.id })
+    })
+  }
+
+  /**
+   * Makes a project from a zipped UFO font and opens it. What cannot be imported
+   * exactly is listed first, and the user can cancel. The project is removed again
+   * if its glyphs cannot be saved.
+   * @param {Object} detail - { name, gridSize, file }
+   */
+  importProject({ name, gridSize, file }) {
+    return this.run(async () => {
+      const margin = defaultMargin(gridSize)
+      const imported = await readUfoFile(file, { size: gridSize, margin })
+      const warnings = summarizeImport(imported.stats, gridSize)
+
+      if (warnings.length > 0) {
+        const list = warnings.map((line) => `• ${line}`).join('\n')
+        const proceed = window.confirm(
+          `Found ${imported.glyphs.length} glyphs.\n\n${list}\n\nCreate the project anyway?`
+        )
+
+        if (!proceed) return
+      }
+
+      const fileName = file.name.replace(/\.(zip|ufoz)$/i, '').replace(/\.ufo$/i, '')
+      const title = (name || imported.familyName || fileName).trim().slice(0, 60) || 'Imported font'
+      const project = await api.createProject({ name: title, gridSize, margin })
+
+      try {
+        const upserts = {}
+
+        for (const { char, grid, spacing } of imported.glyphs) {
+          upserts[char] = serializeGlyph({ grid, shapes: [], spacing })
+        }
+
+        await api.saveGlyphs(project.id, { baseRevision: 0, upserts, deletes: [] })
+      } catch (error) {
+        await api.deleteProject(project.id).catch(() => {})
+        throw error
+      }
+
       window.location.hash = routeToHash({ name: 'editor', projectId: project.id })
     })
   }

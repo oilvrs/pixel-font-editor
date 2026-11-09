@@ -1,11 +1,12 @@
 /**
- * The new font page: a name, a grid size and a create button. It shows what
- * source() gives it and sends an event. The app does the request.
+ * The new font page: a name, a grid size and a create button, and a way to
+ * import a font. It shows what source() gives it and sends events. The app
+ * does the requests.
  *
  * source() returns { busy, error }. Call refresh() when that has changed.
- * Events: project-create { name, gridSize }
+ * Events: project-create { name, gridSize }, project-import { name, gridSize, file }
  *
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 import { SIZES } from '../core/grid.js'
@@ -44,12 +45,6 @@ class GlyphNew extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>
-
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0) }
-          50% { transform: translateY(-4px); }
-        }
-
         :host {
           display: block;
           color: var(--fg);
@@ -63,7 +58,6 @@ class GlyphNew extends HTMLElement {
           justify-content: center;
           min-height: calc(100vh - var(--header-h));
           min-height: calc(100dvh - var(--header-h));
-          min-height: calc(100dvh - var(--header-h));
           padding: 0 1.5rem 18vh;
         }
 
@@ -76,13 +70,11 @@ class GlyphNew extends HTMLElement {
           margin: 0 0 0.5rem;
           font-size: var(--fs-heading);
           font-weight: 700;
-          animation: bounce 0.4s ease infinite;
         }
 
         form {
           display: flex;
           gap: 0.4rem;
-          font-weight:400;
         }
 
         input,
@@ -109,7 +101,10 @@ class GlyphNew extends HTMLElement {
           opacity: 1;
         }
 
-       
+        input:focus-visible {
+          outline: 2px solid var(--fg);
+          outline-offset: 2px;
+        }
 
         select {
           appearance: none;
@@ -156,6 +151,29 @@ class GlyphNew extends HTMLElement {
           font-size: var(--fs-small);
         }
 
+        .import {
+          margin: 1.5rem 0 0;
+        }
+
+        button.link {
+          min-height: 0;
+          padding: 0;
+          background: none;
+          color: var(--fg);
+          font-size: var(--fs-small);
+          text-decoration: underline;
+        }
+
+        button.link:hover:not(:disabled),
+        button.link:focus-visible {
+          transform: none;
+          box-shadow: none;
+        }
+
+        .import .hint {
+          margin-top: 0.25rem;
+        }
+
         .error {
           margin: 0.75rem 0 0;
           color: var(--red);
@@ -179,6 +197,7 @@ class GlyphNew extends HTMLElement {
             transition: none !important;
           }
         }
+
         /* Mobile layout */
         @media (max-width: 30rem) {
           form {
@@ -190,7 +209,7 @@ class GlyphNew extends HTMLElement {
           }
 
           select,
-          button {
+          form button {
             flex: 1 1 0;
             min-height: 48px;
           }
@@ -203,7 +222,6 @@ class GlyphNew extends HTMLElement {
             box-shadow: none;
           }
         }
-
       </style>
       <div class="page">
         <div class="box">
@@ -214,6 +232,11 @@ class GlyphNew extends HTMLElement {
             <button type="submit">create</button>
           </form>
           <p class="hint">the grid size is fixed for the whole project.</p>
+          <div class="import">
+            <button type="button" class="link" id="importBtn">import a font</button>
+            <input type="file" id="importFile" accept=".zip,.ufoz,application/zip" hidden />
+            <p class="hint">a .ufo from this editor, zipped (.zip or .ufoz). it is imported at the grid size above, and the name is optional.</p>
+          </div>
           <p class="error" role="alert" hidden></p>
         </div>
       </div>
@@ -223,12 +246,14 @@ class GlyphNew extends HTMLElement {
     this.form = root.querySelector('form')
     this.nameInput = root.querySelector('[name=name]')
     this.sizeSelect = root.querySelector('[name=size]')
-    this.submitButton = root.querySelector('button')
+    this.submitButton = root.querySelector('form button')
+    this.importButton = root.getElementById('importBtn')
+    this.importFile = root.getElementById('importFile')
     this.errorEl = root.querySelector('.error')
   }
 
   /**
-   * Listens for the form.
+   * Listens for the form and for the import.
    */
   setUpEventListeners() {
     this.form.addEventListener('submit', (event) => {
@@ -243,6 +268,26 @@ class GlyphNew extends HTMLElement {
         })
       )
     })
+
+    this.importButton.addEventListener('click', () => this.importFile.click())
+
+    this.importFile.addEventListener('change', () => {
+      const file = this.importFile.files[0]
+
+      // The field is emptied, so that the same file can be chosen again.
+      this.importFile.value = ''
+      if (!file) return
+
+      this.dispatchEvent(
+        new CustomEvent('project-import', {
+          detail: {
+            name: this.nameInput.value.trim(),
+            gridSize: Number(this.sizeSelect.value),
+            file,
+          },
+        })
+      )
+    })
   }
 
   /**
@@ -253,7 +298,7 @@ class GlyphNew extends HTMLElement {
 
     const { busy, error } = this.source()
 
-    for (const element of [this.nameInput, this.sizeSelect, this.submitButton]) {
+    for (const element of [this.nameInput, this.sizeSelect, this.submitButton, this.importButton]) {
       element.disabled = busy
     }
 
