@@ -15,6 +15,10 @@ const OBJECT_ID = /^[0-9a-f]{24}$/i;
 // The glyphs the thumbnails on the profile page are set in: "Aa Bb".
 const PREVIEW_CHARS = ["A", "a", "B", "b"];
 
+// A glyph with more shapes than this is left out of the previews, so that the list stays small.
+// The thumbnail then shows the letter in the other font.
+const PREVIEW_MAX_SHAPES = 400;
+
 /**
  * A glyph in the shape the editor stores: { size, bits, shapes, spacing }.
  *
@@ -106,6 +110,9 @@ export class ProjectController {
           .lean();
 
         for (const glyph of glyphs) {
+          if ((glyph.shapes || []).length > PREVIEW_MAX_SHAPES) {
+            continue;
+          }
           const id = String(glyph.project);
           previews.get(id)[glyph.char] = toGlyphData(glyph, sizes.get(id));
         }

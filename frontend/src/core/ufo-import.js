@@ -22,6 +22,11 @@ import { createGrid, isEmpty } from './grid.js'
 import { noSpacing } from './glyph.js'
 
 const CURVE_STEPS = 24
+
+// Limits, so that a file that was made to be heavy cannot hang the page.
+const MAX_GLIFS = 2000
+const MAX_GLIF_BYTES = 1024 * 1024
+const MAX_POINTS = 30000
 const GLIF_FILE = /(^|\/)glyphs\/[^/]+\.glif$/i
 const FONT_INFO = /(^|\/)fontinfo\.plist$/i
 const CHARS = new Set(ALL_GLYPHS)
@@ -43,7 +48,7 @@ function charForName(name) {
  * @returns {Object} { x: '1', y: '2', type: 'line' }
  */
 function readAttributes(tag) {
-  const attributes = {}
+  const attributes = Object.create(null)
 
   for (const match of tag.matchAll(/([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
     attributes[match[1]] = match[2] ?? match[3]
@@ -393,6 +398,10 @@ export function importUfo(entries, { size, margin }) {
     throw new Error('no glyphs found. The file should be a zipped .ufo folder')
   }
 
+  if (glifs.length > MAX_GLIFS) {
+    throw new Error('the font has too many glyphs')
+  }
+
   // Only the first font is read, if the zip has several.
   const match = GLIF_FILE.exec(glifs[0].path)
   const prefix = glifs[0].path.slice(0, match.index + match[1].length)
@@ -404,7 +413,12 @@ export function importUfo(entries, { size, margin }) {
   const stats = { total: 0, curves: 0, offGrid: 0, clipped: 0, unknown: 0 }
 
   for (const file of glifs.filter((glif) => glif.path.startsWith(prefix))) {
+    if (file.data.length > MAX_GLIF_BYTES) throw new Error('a glyph file is too large')
+
     const parsed = parseGlif(decoder.decode(file.data))
+    const points = parsed.contours.reduce((sum, contour) => sum + contour.length, 0)
+
+    if (points > MAX_POINTS) throw new Error('a glyph has too many points')
     if (parsed.contours.length === 0) continue // For example space
 
     const glyph = rasterizeGlyph(parsed, { size, margin, upm })

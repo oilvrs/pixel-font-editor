@@ -98,6 +98,7 @@ export async function register(username, password) {
     return await request('POST', '/auth/register', { body: { username, password }, auth: false })
   } catch (error) {
     if (error.status === 409) error.message = 'That username is already taken.'
+    if (error.status === 403) error.message = 'Registration is closed.'
     if (error.status === 400) {
       error.message =
         'The username must be 3 to 30 characters and the password 10 to 72 characters.'

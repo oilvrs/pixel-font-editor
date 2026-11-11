@@ -67,9 +67,9 @@ class GlyphLogin extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          min-height: calc(100vh - var(--header-h));
-          min-height: calc(100dvh - var(--header-h));
-          min-height: calc(100dvh - var(--header-h));
+          min-height: calc(100vh - var(--header-h) - var(--footer-h));
+          min-height: calc(100dvh - var(--header-h) - var(--footer-h));
+          min-height: calc(100dvh - var(--header-h) - var(--footer-h));
           padding: 0 1.5rem 14vh;
         }
 

@@ -326,3 +326,15 @@ test('a glyph is found by its name when it has no unicode', () => {
     ['å']
   )
 })
+
+test('a glyph file that is too large, or has too many points, is rejected', () => {
+  const wrap = (points) =>
+    `<glyph name="A"><advance width="900"/><unicode hex="0041"/><outline><contour>${points}</contour></outline></glyph>`
+  const files = (text) => [{ name: 'F.ufo/glyphs/A_.glif', data: encode(text) }]
+
+  const tooLarge = wrap('<point x="1" y="2" type="line"/>'.repeat(40000))
+  assert.throws(() => importUfo(files(tooLarge), { size: 16, margin: 1 }), /too large/)
+
+  const tooMany = wrap('<point x="1" y="2"/>'.repeat(30001))
+  assert.throws(() => importUfo(files(tooMany), { size: 16, margin: 1 }), /too many points/)
+})

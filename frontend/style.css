@@ -136,3 +136,51 @@ body {
 glyph-app {
   min-height: 100dvh;
 }
+
+/* Footer: the page is a column, so the footer sits at the bottom on short pages */
+:root {
+  --footer-h: 3.25rem;
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --footer-h: 4rem;
+  }
+}
+
+glyph-app {
+  display: flex;
+  flex-direction: column;
+}
+
+glyph-app > main {
+  flex: 1 0 auto;
+}
+
+glyph-footer {
+  view-transition-name: site-footer;
+}
+
+/* Footer: the page is a column, so the footer sits at the bottom on short pages */
+:root {
+  --footer-h: 3.25rem;
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --footer-h: 4rem;
+  }
+}
+
+glyph-app {
+  display: flex;
+  flex-direction: column;
+}
+
+glyph-app > main {
+  flex: 1 0 auto;
+}
+
+glyph-footer {
+  view-transition-name: site-footer;
+}

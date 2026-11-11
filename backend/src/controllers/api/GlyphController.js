@@ -4,15 +4,17 @@
  * two devices do not silently overwrite each other.
  */
 
-import createError from 'http-errors'
-import mongoose from 'mongoose'
-import { GlyphModel } from '../../models/GlyphModel.js'
-import { ProjectModel } from '../../models/ProjectModel.js'
+import createError from "http-errors";
+import mongoose from "mongoose";
+import { GlyphModel } from "../../models/GlyphModel.js";
+import { ProjectModel } from "../../models/ProjectModel.js";
 import {
   MAX_GLYPHS,
   assertAllowedChar,
-  validateGlyph
-} from '../../validation/glyphValidation.js'
+  validateGlyph,
+} from "../../validation/glyphValidation.js";
+
+const MAX_SHAPES_PER_PROJECT = 60000;
 
 /**
  * Reads and validates a batch from a request body. Nothing is saved here.
@@ -23,57 +25,70 @@ import {
  *   Empty glyphs are returned as removals.
  * @throws {Error} A 400 error if the batch is invalid.
  */
-function parseBatch (body, gridSize) {
-  const { baseRevision, upserts = {}, deletes = [] } = body ?? {}
+function parseBatch(body, gridSize) {
+  const { baseRevision, upserts = {}, deletes = [] } = body ?? {};
 
   if (!Number.isInteger(baseRevision) || baseRevision < 0) {
-    throw createError(400, 'baseRevision must be a non-negative integer.')
+    throw createError(400, "baseRevision must be a non-negative integer.");
   }
 
-  if (upserts === null || typeof upserts !== 'object' || Array.isArray(upserts)) {
-    throw createError(400, 'upserts must be an object with one entry per character.')
+  if (
+    upserts === null ||
+    typeof upserts !== "object" ||
+    Array.isArray(upserts)
+  ) {
+    throw createError(
+      400,
+      "upserts must be an object with one entry per character.",
+    );
   }
 
   if (!Array.isArray(deletes)) {
-    throw createError(400, 'deletes must be an array of characters.')
+    throw createError(400, "deletes must be an array of characters.");
   }
 
-  const upsertChars = Object.keys(upserts)
-  const total = upsertChars.length + deletes.length
+  const upsertChars = Object.keys(upserts);
+  const total = upsertChars.length + deletes.length;
 
   if (total === 0) {
-    throw createError(400, 'There is nothing to save.')
+    throw createError(400, "There is nothing to save.");
   }
 
   if (total > MAX_GLYPHS) {
-    throw createError(400, `At most ${MAX_GLYPHS} glyphs can be changed at once.`)
+    throw createError(
+      400,
+      `At most ${MAX_GLYPHS} glyphs can be changed at once.`,
+    );
   }
 
-  const removals = new Set()
+  const removals = new Set();
   for (const char of deletes) {
-    assertAllowedChar(char)
-    removals.add(char)
+    assertAllowedChar(char);
+    removals.add(char);
   }
 
-  const toWrite = []
+  const toWrite = [];
   for (const char of upsertChars) {
-    assertAllowedChar(char)
+    assertAllowedChar(char);
 
     if (removals.has(char)) {
-      throw createError(400, `Glyph "${char}" cannot be both saved and deleted.`)
+      throw createError(
+        400,
+        `Glyph "${char}" cannot be both saved and deleted.`,
+      );
     }
 
-    const data = validateGlyph(char, upserts[char], gridSize)
+    const data = validateGlyph(char, upserts[char], gridSize);
 
     if (data === null) {
       // An empty glyph is not stored. The editor does the same.
-      removals.add(char)
+      removals.add(char);
     } else {
-      toWrite.push({ char, ...data })
+      toWrite.push({ char, ...data });
     }
   }
 
-  return { baseRevision, toWrite, removals: [...removals] }
+  return { baseRevision, toWrite, removals: [...removals] };
 }
 
 /**
@@ -89,12 +104,15 @@ export class GlyphController {
    * @param {object} res - Express response object.
    * @param {Function} next - Express next middleware function.
    */
-  async save (req, res, next) {
+  async save(req, res, next) {
     try {
-      const project = req.doc
-      const { baseRevision, toWrite, removals } = parseBatch(req.body, project.gridSize)
+      const project = req.doc;
+      const { baseRevision, toWrite, removals } = parseBatch(
+        req.body,
+        project.gridSize,
+      );
 
-      let updated
+      let updated;
 
       await mongoose.connection.transaction(async (session) => {
         // Compare and increase the revision in one step. If another save got there
@@ -103,47 +121,71 @@ export class GlyphController {
         const claimed = await ProjectModel.updateOne(
           { _id: project._id, revision: baseRevision },
           { $inc: { revision: 1 }, $set: { updatedAt: new Date() } },
-          { session }
-        )
+          { session },
+        );
 
         if (claimed.matchedCount === 0) {
-          throw createError(409, 'The project has been changed elsewhere. Reload it before saving.')
+          throw createError(
+            409,
+            "The project has been changed elsewhere. Reload it before saving.",
+          );
         }
 
         const operations = toWrite.map(({ char, bits, shapes, spacing }) => ({
           updateOne: {
             filter: { project: project._id, char },
             update: { $set: { bits, shapes, spacing } },
-            upsert: true
-          }
-        }))
+            upsert: true,
+          },
+        }));
 
         if (removals.length > 0) {
           operations.push({
-            deleteMany: { filter: { project: project._id, char: { $in: removals } } }
-          })
+            deleteMany: {
+              filter: { project: project._id, char: { $in: removals } },
+            },
+          });
         }
 
-        await GlyphModel.bulkWrite(operations, { session })
+        await GlyphModel.bulkWrite(operations, { session });
 
-        const glyphCount = await GlyphModel
-          .countDocuments({ project: project._id })
-          .session(session)
+        // A project has a limit on shapes, so that one account cannot fill the database.
+        // Throwing here undoes the whole save.
+        const [totals] = await GlyphModel.aggregate([
+          { $match: { project: project._id } },
+          {
+            $group: {
+              _id: null,
+              shapes: { $sum: { $size: { $ifNull: ["$shapes", []] } } },
+            },
+          },
+        ]).session(session);
+
+        if (totals && totals.shapes > MAX_SHAPES_PER_PROJECT) {
+          throw createError(
+            413,
+            `A project can have at most ${MAX_SHAPES_PER_PROJECT} shapes in total.`,
+          );
+        }
+
+        const glyphCount = await GlyphModel.countDocuments({
+          project: project._id,
+        }).session(session);
 
         updated = await ProjectModel.findOneAndUpdate(
           { _id: project._id },
           { $set: { glyphCount } },
-          { session, new: true }
-        )
-      })
+          { session, new: true },
+        );
+      });
 
       res.json({
         revision: updated.revision,
         glyphCount: updated.glyphCount,
-        updatedAt: updated.updatedAt
-      })
+        updatedAt: updated.updatedAt,
+      });
     } catch (error) {
-      next(error)
+      next(error);
     }
   }
 }

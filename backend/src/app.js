@@ -20,6 +20,25 @@ import {
 } from "./middleware/rateLimiter.js";
 
 /**
+ * The origins that may call the API, from CORS_ORIGIN (comma separated). In production the
+ * variable is required. Without it, no other origin is allowed.
+ *
+ * @returns {string[]|boolean} The origins, or false for none.
+ */
+function corsOrigins() {
+  const origins = (process.env.CORS_ORIGIN || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0 && process.env.NODE_ENV === "production") {
+    throw new Error("CORS_ORIGIN must be set in production.");
+  }
+
+  return origins.length > 0 ? origins : false;
+}
+
+/**
  * Creates the Express application.
  *
  * @param {object} [options] - Options, mainly for tests.
@@ -33,7 +52,7 @@ export function createApp({
   authLimit = 10,
   projectLimit = 1000,
 } = {}) {
-  const { NODE_ENV, CORS_ORIGIN } = process.env;
+  const { NODE_ENV } = process.env;
 
   const app = express();
 
@@ -50,7 +69,7 @@ export function createApp({
   app.use(createGeneralLimiter(generalLimit));
 
   // Enable Cross Origin Resource Sharing (CORS).
-  app.use(cors({ origin: CORS_ORIGIN.split(",").map((origin) => origin.trim()) }));
+  app.use(cors({ origin: corsOrigins() }));
 
   // Parse requests of the content type application/json.
   // The limit is raised for saving many glyphs at once (step 2).
@@ -68,6 +87,12 @@ export function createApp({
     // each request in the request-scoped context.
     req.requestUuid = randomUUID();
     httpContext.set("request", req);
+    next();
+  });
+
+  // The answers contain private data, so the browser and proxies must not store them.
+  app.use("/api/v1", (req, res, next) => { 
+    res.set("Cache-Control", "no-store");
     next();
   });
 

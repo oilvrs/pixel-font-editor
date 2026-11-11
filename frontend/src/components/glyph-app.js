@@ -52,7 +52,7 @@ class GlyphApp extends HTMLElement {
   connectedCallback() {
     this.header = document.createElement('glyph-header')
     this.main = document.createElement('main')
-    this.replaceChildren(this.header, this.main)
+    this.replaceChildren(this.header, this.main, document.createElement('glyph-footer'))
 
     window.addEventListener('hashchange', this.onHashChange)
     window.addEventListener('session-expired', this.onSessionExpired)
@@ -115,7 +115,18 @@ class GlyphApp extends HTMLElement {
     if (route.name === 'login') this.showLogin()
     else if (route.name === 'editor') this.showEditor(route.projectId)
     else if (route.name === 'profile') this.showProfile()
+    else if (route.name === 'about') this.showAbout()
     else this.showNew()
+  }
+
+  /**
+   * Shows the about page.
+   */
+  showAbout() {
+    const view = document.createElement('glyph-about')
+
+    this.main.append(view)
+    this.view = view
   }
 
   /**

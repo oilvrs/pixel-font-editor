@@ -16,6 +16,7 @@ import { UserModel } from "../src/models/UserModel.js";
 import { createTestApp } from "./helpers/testApp.js";
 import { createUser } from "./helpers/auth.js";
 import { startTestDatabase, stopTestDatabase } from "./helpers/db.js";
+import { ALL_GLYPHS } from "../../frontend/src/core/glyph-set.js";
 
 const app = createTestApp();
 
@@ -474,6 +475,29 @@ describe("PUT /api/v1/projects/:id/glyphs", () => {
       expect(res.status).toBe(404);
       expect(await GlyphModel.countDocuments()).toBe(0);
     });
+
+      describe("limits", () => {
+    it("rolls back a save that would give the project too many shapes", async () => {
+      // 30 glyphs with 2000 shapes each is exactly the limit of 60 000.
+      await GlyphModel.insertMany(
+        ALL_GLYPHS.slice(0, 30).map((char) => ({
+          project: project.id,
+          char,
+          bits: "AAAA",
+          shapes: Array(2000).fill(RECT),
+        })),
+      );
+
+      const res = await save(oliver, project.id, {
+        baseRevision: 0,
+        upserts: { [ALL_GLYPHS[30]]: makeGlyph(32, [[1, 1]], { shapes: Array(2000).fill(RECT) }) },
+      });
+
+      expect(res.status).toBe(413);
+      expect((await ProjectModel.findById(project.id)).revision).toBe(0);
+      expect(await GlyphModel.countDocuments({ project: project.id })).toBe(30);
+    });
+  });
 
     it("returns 404 for a malformed project id", async () => {
       const res = await save(oliver, "not-an-id", {

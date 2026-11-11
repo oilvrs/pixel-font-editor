@@ -6,8 +6,9 @@
  *   #/profile    the user's fonts
  *   #/p/<id>     the editor for one project
  *   #/login      log in or create an account
+ *   #/about      about the app, open to everyone
  *
- * @version 0.2.0
+ * @version 0.3.0
  */
 
 const PROJECT_ID = /^[0-9a-f]{24}$/i
@@ -15,7 +16,7 @@ const PROJECT_ID = /^[0-9a-f]{24}$/i
 /**
  * Reads a route from a URL hash. Anything unknown becomes the new font page.
  * @param {string|null|undefined} hash - for example '#/p/65f0c1d2e3a4b5c6d7e8f901'
- * @returns {Object} { name: 'new' | 'profile' | 'login' } or { name: 'editor', projectId }
+ * @returns {Object} { name: 'new' | 'profile' | 'login' | 'about' } or { name: 'editor', projectId }
  */
 export function parseRoute(hash) {
   const path = String(hash || '')
@@ -26,6 +27,7 @@ export function parseRoute(hash) {
 
   if (parts.length === 1) {
     if (parts[0] === 'login') return { name: 'login' }
+    if (parts[0] === 'about') return { name: 'about' }
     // 'projects' is the old name of the profile page.
     if (parts[0] === 'profile' || parts[0] === 'projects') return { name: 'profile' }
   }
@@ -44,21 +46,25 @@ export function parseRoute(hash) {
  */
 export function routeToHash(route) {
   if (route.name === 'login') return '#/login'
+  if (route.name === 'about') return '#/about'
   if (route.name === 'profile') return '#/profile'
   if (route.name === 'editor') return `#/p/${route.projectId}`
   return '#/new'
 }
 
 /**
- * Decides which route to show. Someone who is not logged in only gets the
- * login page, and someone who is logged in does not need it.
+ * Decides which route to show. The about page is open to everyone. Someone who
+ * is not logged in gets the login page for everything else, and someone who is
+ * logged in does not need it.
  * @param {string} hash - the current URL hash
  * @param {boolean} loggedIn
  * @returns {Object} the route to show
  */
 export function resolveRoute(hash, loggedIn) {
+  const route = parseRoute(hash)
+
+  if (route.name === 'about') return route
   if (!loggedIn) return { name: 'login' }
 
-  const route = parseRoute(hash)
   return route.name === 'login' ? { name: 'new' } : route
 }

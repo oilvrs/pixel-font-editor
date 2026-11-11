@@ -4,10 +4,11 @@ import { parseRoute, resolveRoute, routeToHash } from '../src/core/route.js'
 
 const ID = '0123456789abcdef01234567'
 
-test('parseRoute reads the four routes', () => {
+test('parseRoute reads the five routes', () => {
   assert.deepEqual(parseRoute('#/new'), { name: 'new' })
   assert.deepEqual(parseRoute('#/profile'), { name: 'profile' })
   assert.deepEqual(parseRoute('#/login'), { name: 'login' })
+  assert.deepEqual(parseRoute('#/about'), { name: 'about' })
   assert.deepEqual(parseRoute(`#/p/${ID}`), { name: 'editor', projectId: ID })
 })
 
@@ -28,6 +29,7 @@ test('parseRoute falls back to the new font page', () => {
     `#/p/${ID}0`,
     '#/login/extra',
     '#/profile/extra',
+    '#/about/extra',
     undefined,
     null,
   ]) {
@@ -38,24 +40,28 @@ test('parseRoute falls back to the new font page', () => {
 test('parseRoute ignores a trailing slash and a query string', () => {
   assert.deepEqual(parseRoute('#/login/'), { name: 'login' })
   assert.deepEqual(parseRoute('#/profile?x=1'), { name: 'profile' })
+  assert.deepEqual(parseRoute('#/about/'), { name: 'about' })
   assert.deepEqual(parseRoute(`#/p/${ID}/`), { name: 'editor', projectId: ID })
 })
 
 test('routeToHash is the inverse of parseRoute', () => {
-  for (const hash of ['#/new', '#/profile', '#/login', `#/p/${ID}`]) {
+  for (const hash of ['#/new', '#/profile', '#/login', '#/about', `#/p/${ID}`]) {
     assert.equal(routeToHash(parseRoute(hash)), hash)
   }
 })
 
-test('resolveRoute sends everyone who is logged out to the login page', () => {
+test('resolveRoute sends everyone who is logged out to the login page, except for the about page', () => {
   for (const hash of ['', '#/new', '#/profile', '#/login', `#/p/${ID}`]) {
     assert.deepEqual(resolveRoute(hash, false), { name: 'login' }, hash)
   }
+
+  assert.deepEqual(resolveRoute('#/about', false), { name: 'about' })
 })
 
 test('resolveRoute keeps the route of someone who is logged in, except login', () => {
   assert.deepEqual(resolveRoute('#/new', true), { name: 'new' })
   assert.deepEqual(resolveRoute('#/profile', true), { name: 'profile' })
+  assert.deepEqual(resolveRoute('#/about', true), { name: 'about' })
   assert.deepEqual(resolveRoute(`#/p/${ID}`, true), { name: 'editor', projectId: ID })
   assert.deepEqual(resolveRoute('#/login', true), { name: 'new' })
   assert.deepEqual(resolveRoute('', true), { name: 'new' })

@@ -135,6 +135,20 @@ describe("POST /api/v1/projects", () => {
 
 describe("GET /api/v1/projects", () => {
   describe("GET /api/v1/projects: previews", () => {
+        it("leaves a glyph with very many shapes out of the previews", async () => {
+      const { body } = await createProject(oliver);
+      const shape = { type: "rect", cx: 0.5, cy: 0.5, w: 1, h: 1, angle: 0 };
+
+      await GlyphModel.create([
+        { project: body.id, char: "A", bits: "AAAA", shapes: Array(401).fill(shape) },
+        { project: body.id, char: "B", bits: "AAAA", shapes: Array(400).fill(shape) },
+      ]);
+
+      const res = await request(app).get("/api/v1/projects").set(as(oliver));
+
+      expect(Object.keys(res.body[0].preview)).toEqual(["B"]);
+    });
+    
     it("includes the glyphs the thumbnails are set in, for each project", async () => {
       const first = await createProject(oliver, { name: "First", gridSize: 8 });
       const second = await createProject(oliver, {

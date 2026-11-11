@@ -16,3 +16,5 @@ process.env.ACCESS_TOKEN_SECRET = privateKey
 process.env.ACCESS_TOKEN_PUBLIC = publicKey
 process.env.ACCESS_TOKEN_LIFE = '1h'
 process.env.CORS_ORIGIN = 'http://localhost:3003'
+process.env.BCRYPT_ROUNDS = "4";
+process.env.BCRYPT_ROUNDS = "4";

@@ -6,6 +6,12 @@ import bcrypt from 'bcryptjs'
 import mongoose from 'mongoose'
 import { BASE_SCHEMA } from './baseSchema.js'
 
+const ROUNDS = Number(process.env.BCRYPT_ROUNDS) || 12;
+
+// Compared against when a username does not exist, so that a login takes the same time
+// for a name that exists and for one that does not.
+const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", ROUNDS);
+
 const schema = new mongoose.Schema({
   username: {
     type: String,
@@ -48,7 +54,7 @@ schema.add(BASE_SCHEMA)
 schema.pre('save', async function () {
   // Only hash the password if it has been changed (avoids double-hashing).
   if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, 10)
+      this.password = await bcrypt.hash(this.password, ROUNDS);
   }
 })
 
@@ -60,17 +66,21 @@ schema.pre('save', async function () {
  * @returns {Promise<UserModel>} Resolves to the user if authentication succeeded.
  */
 schema.statics.authenticate = async function (username, password) {
-  const user = await this.findOne({ username })
+  const user = await this.findOne({ username });
+
+  // Compare with a dummy hash when the user does not exist, so that the answer takes the same
+  // time and does not show which usernames are registered.
+  const valid = await bcrypt.compare(password, user ? user.password : DUMMY_HASH);
 
   // Check both in one condition to avoid revealing whether the username
   // or the password was wrong.
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    const error = new Error('Invalid credentials.')
-    error.status = 401
-    throw error
+  if (!user || !valid) {
+    const error = new Error("Invalid credentials.");
+    error.status = 401;
+    throw error;
   }
 
-  return user
-}
+  return user;
+};
 
 export const UserModel = mongoose.model('User', schema)

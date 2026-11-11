@@ -5,22 +5,34 @@
  * that is passed in, since the browser and Node do that differently (see
  * utils/decompress.js). Checksums are not checked.
  *
- * @version 0.1.0
+ * The limits protect against a file that was made to be heavy, for example a few
+ * kilobytes that unpack to gigabytes.
+ *
+ * @version 0.2.0
  */
 
 const END_OF_DIRECTORY = 0x06054b50
 const CENTRAL_ENTRY = 0x02014b50
 const LOCAL_HEADER = 0x04034b50
+const TOO_LARGE = 'the zip file is too large when unpacked'
+
+export const ZIP_LIMITS = Object.freeze({
+  entries: 5000,
+  entryBytes: 5 * 1024 * 1024,
+  totalBytes: 50 * 1024 * 1024,
+})
 
 /**
  * Reads the entries of a ZIP file.
  * @param {Uint8Array} bytes - the file
- * @param {Function} inflate - async (Uint8Array) => Uint8Array, unpacks raw deflate data
+ * @param {Function} inflate - async (Uint8Array, limit) => Uint8Array, unpacks raw deflate data
+ *   and fails if the result is larger than limit bytes
  * @param {Function} [wanted] - (name) => boolean. Entries that are not wanted are not unpacked.
+ * @param {Object} [limits] - { entries, entryBytes, totalBytes }
  * @returns {Promise<Object[]>} [{ name, data }], without folders
- * @throws {Error} if the file is not a ZIP file, or uses something that is not supported
+ * @throws {Error} if the file is not a ZIP file, is too large, or uses something that is not supported
  */
-export async function readZip(bytes, inflate, wanted = () => true) {
+export async function readZip(bytes, inflate, wanted = () => true, limits = ZIP_LIMITS) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const decoder = new TextDecoder()
 
@@ -39,8 +51,10 @@ export async function readZip(bytes, inflate, wanted = () => true) {
   let offset = view.getUint32(end + 16, true)
 
   if (count === 0xffff || offset === 0xffffffff) throw new Error('zip64 files are not supported')
+  if (count > limits.entries) throw new Error('the zip file has too many files')
 
   const entries = []
+  let total = 0
 
   for (let i = 0; i < count; i++) {
     if (offset + 46 > bytes.length || view.getUint32(offset, true) !== CENTRAL_ENTRY) {
@@ -72,14 +86,22 @@ export async function readZip(bytes, inflate, wanted = () => true) {
       view.getUint16(localOffset + 26, true) +
       view.getUint16(localOffset + 28, true)
     const raw = bytes.subarray(start, start + size)
+    let data
 
     if (method === 0) {
-      entries.push({ name, data: raw.slice() })
+      if (size > limits.entryBytes) throw new Error(TOO_LARGE)
+      data = raw.slice()
     } else if (method === 8) {
-      entries.push({ name, data: await inflate(raw) })
+      data = await inflate(raw, limits.entryBytes)
+      if (data.length > limits.entryBytes) throw new Error(TOO_LARGE)
     } else {
       throw new Error(`zip compression method ${method} is not supported`)
     }
+
+    total += data.length
+    if (total > limits.totalBytes) throw new Error(TOO_LARGE)
+
+    entries.push({ name, data })
   }
 
   return entries

@@ -4,7 +4,8 @@ import zlib from 'node:zlib'
 import { createZip } from '../src/core/zip.js'
 import { readZip } from '../src/core/zip-read.js'
 
-const inflate = async (raw) => new Uint8Array(zlib.inflateRawSync(raw))
+const inflate = async (raw, limit) =>
+  new Uint8Array(zlib.inflateRawSync(raw, { maxOutputLength: limit }))
 const encode = (text) => new TextEncoder().encode(text)
 
 /**
@@ -99,9 +100,9 @@ test('readZip leaves out folders and entries that are not wanted, without unpack
   ])
 
   let unpacked = 0
-  const counting = async (raw) => {
+  const counting = async (raw, limit) => {
     unpacked++
-    return inflate(raw)
+    return inflate(raw, limit)
   }
 
   const entries = await readZip(zip, counting, (name) => name.endsWith('.txt'))
@@ -116,4 +117,38 @@ test('readZip leaves out folders and entries that are not wanted, without unpack
 test('readZip rejects files that are not zip files', async () => {
   await assert.rejects(() => readZip(encode('this is not a zip file at all'), inflate), /not a zip/)
   await assert.rejects(() => readZip(new Uint8Array(0), inflate), /not a zip/)
+})
+
+test('readZip rejects a file that is too large when unpacked', async () => {
+  const zip = makeZip([{ name: 'a.bin', data: new Uint8Array(1000).fill(1), deflate: true }])
+  const bomb = async () => new Uint8Array(6 * 1024 * 1024)
+
+  await assert.rejects(() => readZip(zip, bomb), /too large/)
+})
+
+test('readZip enforces the limits on stored files, on the number of files and on the total', async () => {
+  const stored = makeZip([{ name: 'a.bin', data: new Uint8Array(100) }])
+  await assert.rejects(
+    () => readZip(stored, inflate, () => true, { entries: 10, entryBytes: 50, totalBytes: 1000 }),
+    /too large/
+  )
+
+  const many = makeZip([
+    { name: 'a', data: encode('1') },
+    { name: 'b', data: encode('2') },
+    { name: 'c', data: encode('3') },
+  ])
+  await assert.rejects(
+    () => readZip(many, inflate, () => true, { entries: 2, entryBytes: 100, totalBytes: 1000 }),
+    /too many files/
+  )
+
+  const two = makeZip([
+    { name: 'a', data: new Uint8Array(60) },
+    { name: 'b', data: new Uint8Array(60) },
+  ])
+  await assert.rejects(
+    () => readZip(two, inflate, () => true, { entries: 10, entryBytes: 100, totalBytes: 100 }),
+    /too large/
+  )
 })
