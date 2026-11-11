@@ -20,7 +20,7 @@
   },
   "homepage": "https://github.com/oilvrs/pixel-font-editor#readme",
   "devDependencies": {
-    "prettier": "^3.9.9",
+    "prettier": "^3.9.10",
     "vite": "^8.3.2"
   }
 }
